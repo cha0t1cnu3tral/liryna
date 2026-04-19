@@ -2,7 +2,7 @@
 #define WORLD_H
 
 #include <stdbool.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 typedef struct World
 {

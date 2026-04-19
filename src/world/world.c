@@ -113,21 +113,21 @@ void world_render(World *world, SDL_Renderer *renderer)
     {
         for (int x = 0; x < world->width; x++)
         {
-            SDL_Rect tile_rect;
-            tile_rect.x = x * world->tile_size;
-            tile_rect.y = y * world->tile_size;
-            tile_rect.w = world->tile_size;
-            tile_rect.h = world->tile_size;
+            SDL_FRect tile_rect;
+            tile_rect.x = (float)(x * world->tile_size);
+            tile_rect.y = (float)(y * world->tile_size);
+            tile_rect.w = (float)world->tile_size;
+            tile_rect.h = (float)world->tile_size;
 
-            SDL_RenderDrawRect(renderer, &tile_rect);
+            SDL_RenderRect(renderer, &tile_rect);
         }
     }
 
-    SDL_Rect player_rect;
-    player_rect.x = (int)world->player_x;
-    player_rect.y = (int)world->player_y;
-    player_rect.w = world->tile_size;
-    player_rect.h = world->tile_size;
+    SDL_FRect player_rect;
+    player_rect.x = world->player_x;
+    player_rect.y = world->player_y;
+    player_rect.w = (float)world->tile_size;
+    player_rect.h = (float)world->tile_size;
 
     SDL_SetRenderDrawColor(renderer, 0, 200, 0, 255);
     SDL_RenderFillRect(renderer, &player_rect);
