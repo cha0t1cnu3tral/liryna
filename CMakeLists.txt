@@ -26,6 +26,37 @@ endif()
 
 add_executable(liryna ${LIRYNA_SOURCES})
 
+set(SDL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL")
+
+if(NOT EXISTS "${SDL_SOURCE_DIR}/CMakeLists.txt")
+    file(GLOB SDL_VERSIONED_DIRS CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL3-*"
+    )
+
+    list(LENGTH SDL_VERSIONED_DIRS SDL_VERSIONED_DIR_COUNT)
+    if(SDL_VERSIONED_DIR_COUNT EQUAL 1)
+        list(GET SDL_VERSIONED_DIRS 0 SDL_SOURCE_DIR)
+    elseif(SDL_VERSIONED_DIR_COUNT GREATER 1)
+        message(FATAL_ERROR "Multiple versioned SDL source directories found under third_party/. Keep only one SDL3-* directory or set SDL_SOURCE_DIR explicitly.")
+    endif()
+endif()
+
+if(NOT EXISTS "${SDL_SOURCE_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "SDL source not found. Expected third_party/SDL/CMakeLists.txt or one versioned third_party/SDL3-*/CMakeLists.txt directory.")
+endif()
+
+add_subdirectory("${SDL_SOURCE_DIR}" EXCLUDE_FROM_ALL)
+
+if(TARGET SDL3::SDL3)
+    set(LIRYNA_SDL_TARGET SDL3::SDL3)
+elseif(TARGET SDL3::SDL3-shared)
+    set(LIRYNA_SDL_TARGET SDL3::SDL3-shared)
+elseif(TARGET SDL3::SDL3-static)
+    set(LIRYNA_SDL_TARGET SDL3::SDL3-static)
+else()
+    message(FATAL_ERROR "SDL was added, but no SDL3 CMake target was found.")
+endif()
+
 set(PRISM_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/prism-sdk-v0.11.6")
 
 if(WIN32)
@@ -78,7 +109,7 @@ target_include_directories(liryna
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 
-target_link_libraries(liryna PRIVATE prism_sdk)
+target_link_libraries(liryna PRIVATE prism_sdk ${LIRYNA_SDL_TARGET})
 
 if(MSVC)
     target_compile_options(liryna PRIVATE /W4)
@@ -95,6 +126,14 @@ add_custom_command(TARGET liryna POST_BUILD
         "$<TARGET_FILE:prism_sdk>"
         "$<TARGET_FILE_DIR:liryna>"
 )
+
+if(TARGET SDL3::SDL3-shared)
+    add_custom_command(TARGET liryna POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:SDL3::SDL3-shared>"
+            "$<TARGET_FILE_DIR:liryna>"
+    )
+endif()
 
 include(CTest)
 
