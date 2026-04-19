@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  repository-sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate baseline files
+        run: |
+          test -f README.md
+          test -f LICENSE
+          test -f NOTICE
+          test -f .gitignore
+          test -f CONTRIBUTING.md
+
+      - name: Guard ignored local directories
+        run: |
+          if git ls-files --error-unmatch build 1>/dev/null 2>/dev/null; then
+            echo "build/ must not be tracked"
+            exit 1
+          fi
+          if git ls-files --error-unmatch saves 1>/dev/null 2>/dev/null; then
+            echo "saves/ must not be tracked"
+            exit 1
+          fi

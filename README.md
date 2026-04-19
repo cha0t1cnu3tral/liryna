@@ -31,3 +31,15 @@ tools/        Scripts and utility tools
 - Prefer small, focused commits with clear messages.
 - Document decisions in `docs/` as the project evolves.
 
+## License
+
+This project is licensed under `GPL-3.0-or-later`.
+
+That means:
+- You can use, modify, and redistribute the code.
+- You must keep attribution/copyright and license notices.
+- If you distribute modified versions, those derivatives must also be open source under `GPL-3.0-or-later` and include source code.
+
+See:
+- `LICENSE` for full legal terms.
+- `NOTICE` for project attribution details.
