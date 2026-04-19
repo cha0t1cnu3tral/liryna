@@ -1,3 +1,6 @@
+# Ignore Prism
+third_party/prism*
+
 # Build outputs
 /build/
 /out/
