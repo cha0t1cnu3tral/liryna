@@ -20,34 +20,11 @@ bool world_init(World *world, int width, int height, int tile_size)
     return true;
 }
 
-void world_update(World *world, float delta_time, const Uint8 *keyboard_state)
+void world_update(World *world, float delta_time, float move_x, float move_y)
 {
-    if (world == NULL || keyboard_state == NULL)
+    if (world == NULL)
     {
         return;
-    }
-
-    float move_x = 0.0f;
-    float move_y = 0.0f;
-
-    if (keyboard_state[SDL_SCANCODE_W] || keyboard_state[SDL_SCANCODE_UP])
-    {
-        move_y -= 1.0f;
-    }
-
-    if (keyboard_state[SDL_SCANCODE_S] || keyboard_state[SDL_SCANCODE_DOWN])
-    {
-        move_y += 1.0f;
-    }
-
-    if (keyboard_state[SDL_SCANCODE_A] || keyboard_state[SDL_SCANCODE_LEFT])
-    {
-        move_x -= 1.0f;
-    }
-
-    if (keyboard_state[SDL_SCANCODE_D] || keyboard_state[SDL_SCANCODE_RIGHT])
-    {
-        move_x += 1.0f;
     }
 
     if (move_x != 0.0f && move_y != 0.0f)

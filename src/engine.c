@@ -1,19 +1,43 @@
 #include "engine.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 
 struct Engine
 {
     bool running;
     int tick_count;
+    float delta_time;
+    Uint64 previous_counter;
+    const bool *keyboard_state;
+    SDL_Window *window;
 };
 
 void engine_run(const EngineCallbacks *callbacks, void *userdata)
 {
+    if (!SDL_Init(SDL_INIT_VIDEO))
+    {
+        fprintf(stderr, "engine: SDL initialization failed: %s\n",
+                SDL_GetError());
+        return;
+    }
+
     Engine engine = {
         .running = true,
         .tick_count = 0,
+        .delta_time = 0.0f,
+        .previous_counter = SDL_GetPerformanceCounter(),
+        .keyboard_state = NULL,
+        .window = NULL,
     };
+
+    engine.window = SDL_CreateWindow("Liryna", 0, 0, SDL_WINDOW_FULLSCREEN);
+    if (!engine.window)
+    {
+        fprintf(stderr, "engine: window creation failed: %s\n", SDL_GetError());
+        SDL_Quit();
+        return;
+    }
 
     if (callbacks && callbacks->init)
     {
@@ -22,6 +46,23 @@ void engine_run(const EngineCallbacks *callbacks, void *userdata)
 
     while (engine.running)
     {
+        SDL_Event event;
+        while (SDL_PollEvent(&event))
+        {
+            if (event.type == SDL_EVENT_QUIT)
+            {
+                engine_stop(&engine);
+            }
+        }
+
+        engine.keyboard_state = SDL_GetKeyboardState(NULL);
+
+        Uint64 current_counter = SDL_GetPerformanceCounter();
+        engine.delta_time =
+            (float)((double)(current_counter - engine.previous_counter) /
+                    (double)SDL_GetPerformanceFrequency());
+        engine.previous_counter = current_counter;
+
         engine.tick_count++;
 
         if (callbacks && callbacks->update)
@@ -33,12 +74,17 @@ void engine_run(const EngineCallbacks *callbacks, void *userdata)
         {
             callbacks->render(&engine, userdata);
         }
+
+        SDL_Delay(1);
     }
 
     if (callbacks && callbacks->shutdown)
     {
         callbacks->shutdown(&engine, userdata);
     }
+
+    SDL_DestroyWindow(engine.window);
+    SDL_Quit();
 }
 
 void engine_stop(Engine *engine)
@@ -52,4 +98,19 @@ void engine_stop(Engine *engine)
 int engine_tick_count(const Engine *engine)
 {
     return engine ? engine->tick_count : 0;
+}
+
+float engine_delta_time(const Engine *engine)
+{
+    return engine ? engine->delta_time : 0.0f;
+}
+
+bool engine_key_down(const Engine *engine, SDL_Scancode key)
+{
+    if (!engine || !engine->keyboard_state)
+    {
+        return false;
+    }
+
+    return engine->keyboard_state[key];
 }
