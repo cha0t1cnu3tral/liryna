@@ -3,10 +3,8 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include "engine.h"
 #include "speech.h"
-
-static bool running = true;
-static int tick_count = 0;
 
 static void game_announce(const char *text, bool interrupt)
 {
@@ -16,8 +14,11 @@ static void game_announce(const char *text, bool interrupt)
     }
 }
 
-void game_init(void)
+static void game_init(Engine *engine, void *userdata)
 {
+    (void)engine;
+    (void)userdata;
+
     bool speech_ready = speech_init();
 
     if (speech_ready)
@@ -39,9 +40,11 @@ void game_init(void)
     }
 }
 
-void game_update(void)
+static void game_update(Engine *engine, void *userdata)
 {
-    tick_count++;
+    (void)userdata;
+
+    int tick_count = engine_tick_count(engine);
 
     printf("Simulation tick: %d\n", tick_count);
 
@@ -54,17 +57,23 @@ void game_update(void)
 
     if (tick_count >= 10)
     {
-        running = false;
+        engine_stop(engine);
     }
 }
 
-void game_render(void)
+static void game_render(Engine *engine, void *userdata)
 {
+    (void)engine;
+    (void)userdata;
+
     printf("Rendering world state...\n");
 }
 
-void game_shutdown(void)
+static void game_shutdown(Engine *engine, void *userdata)
 {
+    (void)engine;
+    (void)userdata;
+
     speech_say("Shutting down.", true);
     speech_wait(1500);
     speech_shutdown();
@@ -72,19 +81,15 @@ void game_shutdown(void)
     printf("Shutting down.\n");
 }
 
-void game_loop(void)
-{
-    while (running)
-    {
-        game_update();
-        game_render();
-    }
-}
-
 int main(void)
 {
-    game_init();
-    game_loop();
-    game_shutdown();
+    const EngineCallbacks callbacks = {
+        .init = game_init,
+        .update = game_update,
+        .render = game_render,
+        .shutdown = game_shutdown,
+    };
+
+    engine_run(&callbacks, NULL);
     return 0;
 }
