@@ -11,6 +11,7 @@ bool speech_init(void);
 void speech_shutdown(void);
 bool speech_say(const char *text, bool interrupt);
 bool speech_output(const char *text, bool interrupt);
+void speech_wait(int timeout_ms);
 void speech_stop(void);
 const char *speech_backend_name(void);
 

@@ -2,7 +2,9 @@
 
 #include <prism.h>
 
+#include <chrono>
 #include <cstdio>
+#include <thread>
 
 static PrismContext *speech_context = nullptr;
 static PrismBackend *speech_backend = nullptr;
@@ -91,6 +93,50 @@ bool speech_output(const char *text, bool interrupt)
     }
 
     return true;
+}
+
+void speech_wait(int timeout_ms)
+{
+    if (!speech_backend || timeout_ms <= 0)
+    {
+        return;
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(timeout_ms);
+    bool queried_state = false;
+
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        bool speaking = false;
+        PrismError err = prism_backend_is_speaking(speech_backend, &speaking);
+
+        if (err == PRISM_OK)
+        {
+            queried_state = true;
+            if (!speaking)
+            {
+                return;
+            }
+        }
+        else if (err == PRISM_ERROR_NOT_IMPLEMENTED)
+        {
+            break;
+        }
+        else
+        {
+            std::fprintf(stderr, "speech: state query failed: %s\n",
+                         prism_error_string(err));
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    if (!queried_state)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    }
 }
 
 void speech_stop(void)

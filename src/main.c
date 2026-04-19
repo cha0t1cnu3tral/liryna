@@ -8,20 +8,35 @@
 static bool running = true;
 static int tick_count = 0;
 
+static void game_announce(const char *text, bool interrupt)
+{
+    if (!speech_say(text, interrupt))
+    {
+        speech_output(text, interrupt);
+    }
+}
+
 void game_init(void)
 {
-    printf("Life Simulation Engine\n");
-    printf("Initializing...\n");
+    bool speech_ready = speech_init();
+
+    if (speech_ready)
+    {
+        game_announce("Life Simulation Engine.", true);
+        game_announce("Initializing.", false);
+    }
 
     srand((unsigned int)time(NULL));
 
-    if (speech_init())
+    if (speech_ready)
     {
-        printf("Speech backend: %s\n", speech_backend_name());
-        speech_say("Life Simulation Engine ready.", true);
+        char message[128];
+        snprintf(message, sizeof(message), "Speech backend: %s.",
+                 speech_backend_name());
+        game_announce(message, false);
+        game_announce("Ready.", false);
+        speech_wait(3000);
     }
-
-    printf("Ready.\n");
 }
 
 void game_update(void)
@@ -51,6 +66,7 @@ void game_render(void)
 void game_shutdown(void)
 {
     speech_say("Shutting down.", true);
+    speech_wait(1500);
     speech_shutdown();
 
     printf("Shutting down.\n");
