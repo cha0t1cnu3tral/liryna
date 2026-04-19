@@ -52,7 +52,7 @@ static void game_update(Engine *engine, void *userdata)
     {
         char message[64];
         snprintf(message, sizeof(message), "Simulation tick %d.", tick_count);
-        speech_say(message, false);
+        game_announce(message, false);
     }
 
     if (tick_count >= 10)
@@ -74,7 +74,7 @@ static void game_shutdown(Engine *engine, void *userdata)
     (void)engine;
     (void)userdata;
 
-    speech_say("Shutting down.", true);
+    game_announce("Shutting down.", true);
     speech_wait(1500);
     speech_shutdown();
 
