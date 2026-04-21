@@ -10,6 +10,14 @@ typedef struct UiFocusSearch
     const UiWidget *result;
 } UiFocusSearch;
 
+typedef struct UiContainerSearch
+{
+    int target_index;
+    int current_index;
+    const UiWidget *result;
+    const UiWidget *root;
+} UiContainerSearch;
+
 static const char *ui_widget_type_name(UiWidgetType type)
 {
     switch (type)
@@ -35,6 +43,11 @@ static bool ui_is_valid(const UiState *ui)
 static bool ui_widget_can_focus(const UiWidget *widget)
 {
     return widget != NULL && widget->focusable;
+}
+
+static bool ui_widget_is_container(const UiWidget *widget)
+{
+    return widget != NULL && widget->type == UI_WIDGET_CONTAINER;
 }
 
 static void ui_describe_widget(const UiWidget *widget, char *out, size_t out_size)
@@ -93,6 +106,84 @@ static int ui_count_focusable_widgets(const UiWidget *widget)
     return count;
 }
 
+static int ui_count_switchable_containers(const UiWidget *widget, const UiWidget *root)
+{
+    if (widget == NULL)
+    {
+        return 0;
+    }
+
+    int count = 0;
+    if (widget != root && ui_widget_is_container(widget) &&
+        ui_count_focusable_widgets(widget) > 0)
+    {
+        count++;
+    }
+
+    for (int i = 0; i < widget->child_count; i++)
+    {
+        count += ui_count_switchable_containers(&widget->children[i], root);
+    }
+
+    return count;
+}
+
+static void ui_find_switchable_container(const UiWidget *widget,
+                                         UiContainerSearch *search)
+{
+    if (widget == NULL || search == NULL || search->result != NULL)
+    {
+        return;
+    }
+
+    if (widget != search->root && ui_widget_is_container(widget) &&
+        ui_count_focusable_widgets(widget) > 0)
+    {
+        if (search->current_index == search->target_index)
+        {
+            search->result = widget;
+            return;
+        }
+
+        search->current_index++;
+    }
+
+    for (int i = 0; i < widget->child_count; i++)
+    {
+        ui_find_switchable_container(&widget->children[i], search);
+    }
+}
+
+static int ui_container_count_for_root(const UiWidget *root)
+{
+    const int nested_count = ui_count_switchable_containers(root, root);
+    return nested_count > 0 ? nested_count : (ui_count_focusable_widgets(root) > 0 ? 1 : 0);
+}
+
+static const UiWidget *ui_get_container_for_root(const UiWidget *root, int index)
+{
+    if (root == NULL)
+    {
+        return NULL;
+    }
+
+    const int nested_count = ui_count_switchable_containers(root, root);
+    if (nested_count <= 0)
+    {
+        return ui_count_focusable_widgets(root) > 0 ? root : NULL;
+    }
+
+    UiContainerSearch search = {
+        .target_index = index,
+        .current_index = 0,
+        .result = NULL,
+        .root = root,
+    };
+
+    ui_find_switchable_container(root, &search);
+    return search.result;
+}
+
 static void ui_find_focusable_widget(const UiWidget *widget, UiFocusSearch *search)
 {
     if (widget == NULL || search == NULL || search->result != NULL)
@@ -117,7 +208,7 @@ static void ui_find_focusable_widget(const UiWidget *widget, UiFocusSearch *sear
     }
 }
 
-static const UiWidget *ui_get_focusable_widget(const UiWidget *root, int index)
+static const UiWidget *ui_get_focusable_widget(const UiWidget *container, int index)
 {
     UiFocusSearch search = {
         .target_index = index,
@@ -125,8 +216,31 @@ static const UiWidget *ui_get_focusable_widget(const UiWidget *root, int index)
         .result = NULL,
     };
 
-    ui_find_focusable_widget(root, &search);
+    ui_find_focusable_widget(container, &search);
     return search.result;
+}
+
+static const UiWidget *ui_get_focused_container(const UiState *ui,
+                                                const UiScreenDefinition *screen)
+{
+    if (!ui_is_valid(ui) || screen == NULL)
+    {
+        return NULL;
+    }
+
+    return ui_get_container_for_root(screen->root, ui->focused_container_index);
+}
+
+static const UiWidget *ui_get_focused_widget(const UiState *ui,
+                                             const UiScreenDefinition *screen)
+{
+    const UiWidget *container = ui_get_focused_container(ui, screen);
+    if (container == NULL)
+    {
+        return NULL;
+    }
+
+    return ui_get_focusable_widget(container, ui->focused_widget_index);
 }
 
 static void ui_announce_focus(const UiState *ui, UiAnnounceFn announce, bool interrupt)
@@ -142,7 +256,7 @@ static void ui_announce_focus(const UiState *ui, UiAnnounceFn announce, bool int
         return;
     }
 
-    const UiWidget *widget = ui_get_focusable_widget(screen->root, ui->focused_index);
+    const UiWidget *widget = ui_get_focused_widget(ui, screen);
     if (widget == NULL)
     {
         return;
@@ -176,7 +290,8 @@ static void ui_reset_focus(UiState *ui)
 {
     if (ui != NULL)
     {
-        ui->focused_index = 0;
+        ui->focused_container_index = 0;
+        ui->focused_widget_index = 0;
     }
 }
 
@@ -261,7 +376,8 @@ void ui_init(UiState *ui, UiAnnounceFn announce)
     }
 
     ui->screen = UI_SCREEN_MENU;
-    ui->focused_index = 0;
+    ui->focused_container_index = 0;
+    ui->focused_widget_index = 0;
     ui->screen_stack_count = 0;
 
     if (announce != NULL)
@@ -272,8 +388,9 @@ void ui_init(UiState *ui, UiAnnounceFn announce)
 }
 
 void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
-               bool activate_pressed, bool back_pressed, UiAction *action,
-               UiAnnounceFn announce)
+               bool next_container_pressed, bool previous_container_pressed,
+               bool activate_pressed, bool back_pressed,
+               UiAction *action, UiAnnounceFn announce)
 {
     if (action != NULL)
     {
@@ -300,8 +417,8 @@ void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
         return;
     }
 
-    const int focusable_count = ui_count_focusable_widgets(screen->root);
-    if (focusable_count <= 0)
+    const int container_count = ui_container_count_for_root(screen->root);
+    if (container_count <= 0)
     {
         if (back_pressed)
         {
@@ -310,27 +427,71 @@ void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
         return;
     }
 
-    if (ui->focused_index < 0 || ui->focused_index >= focusable_count)
+    if (ui->focused_container_index < 0 || ui->focused_container_index >= container_count)
     {
-        ui->focused_index = 0;
+        ui->focused_container_index = 0;
+        ui->focused_widget_index = 0;
+    }
+
+    const UiWidget *container = ui_get_focused_container(ui, screen);
+    int focusable_count = ui_count_focusable_widgets(container);
+    if (focusable_count <= 0)
+    {
+        ui->focused_container_index = 0;
+        ui->focused_widget_index = 0;
+        container = ui_get_focused_container(ui, screen);
+        focusable_count = ui_count_focusable_widgets(container);
+        if (focusable_count <= 0)
+        {
+            return;
+        }
+    }
+
+    if (ui->focused_widget_index < 0 || ui->focused_widget_index >= focusable_count)
+    {
+        ui->focused_widget_index = 0;
+    }
+
+    if (next_container_pressed && container_count > 1)
+    {
+        ui->focused_container_index++;
+        if (ui->focused_container_index >= container_count)
+        {
+            ui->focused_container_index = 0;
+        }
+        ui->focused_widget_index = 0;
+        ui_announce_focus(ui, announce, true);
+        return;
+    }
+
+    if (previous_container_pressed && container_count > 1)
+    {
+        ui->focused_container_index--;
+        if (ui->focused_container_index < 0)
+        {
+            ui->focused_container_index = container_count - 1;
+        }
+        ui->focused_widget_index = 0;
+        ui_announce_focus(ui, announce, true);
+        return;
     }
 
     if (up_pressed)
     {
-        ui->focused_index--;
-        if (ui->focused_index < 0)
+        ui->focused_widget_index--;
+        if (ui->focused_widget_index < 0)
         {
-            ui->focused_index = focusable_count - 1;
+            ui->focused_widget_index = focusable_count - 1;
         }
         ui_announce_focus(ui, announce, true);
     }
 
     if (down_pressed)
     {
-        ui->focused_index++;
-        if (ui->focused_index >= focusable_count)
+        ui->focused_widget_index++;
+        if (ui->focused_widget_index >= focusable_count)
         {
-            ui->focused_index = 0;
+            ui->focused_widget_index = 0;
         }
         ui_announce_focus(ui, announce, true);
     }
@@ -346,7 +507,7 @@ void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
         return;
     }
 
-    const UiWidget *widget = ui_get_focusable_widget(screen->root, ui->focused_index);
+    const UiWidget *widget = ui_get_focused_widget(ui, screen);
     if (widget == NULL || !widget->enabled)
     {
         ui_announce_focus(ui, announce, true);

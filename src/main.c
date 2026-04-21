@@ -27,6 +27,7 @@ typedef struct Game
     bool prev_page_up;
     bool prev_page_down;
     bool prev_home;
+    bool prev_tab;
 
     bool has_prev_tile;
     int prev_tile_x;
@@ -383,6 +384,7 @@ static void game_init(Engine *engine, void *userdata)
     game->prev_page_up = false;
     game->prev_page_down = false;
     game->prev_home = false;
+    game->prev_tab = false;
     game->has_prev_tile = false;
     game->prev_tile_x = -1;
     game->prev_tile_y = -1;
@@ -424,6 +426,9 @@ static void game_update(Engine *engine, void *userdata)
     const bool page_up_now = engine_key_down(engine, SDL_SCANCODE_PAGEUP);
     const bool page_down_now = engine_key_down(engine, SDL_SCANCODE_PAGEDOWN);
     const bool home_now = engine_key_down(engine, SDL_SCANCODE_HOME);
+    const bool tab_now = engine_key_down(engine, SDL_SCANCODE_TAB);
+    const bool shift_now = engine_key_down(engine, SDL_SCANCODE_LSHIFT) ||
+                           engine_key_down(engine, SDL_SCANCODE_RSHIFT);
     const bool ctrl_now = engine_key_down(engine, SDL_SCANCODE_LCTRL) ||
                           engine_key_down(engine, SDL_SCANCODE_RCTRL);
     const bool alt_down = engine_key_down(engine, SDL_SCANCODE_LALT) ||
@@ -439,6 +444,9 @@ static void game_update(Engine *engine, void *userdata)
     const bool page_up_pressed = page_up_now && !game->prev_page_up;
     const bool page_down_pressed = page_down_now && !game->prev_page_down;
     const bool home_pressed = home_now && !game->prev_home;
+    const bool tab_pressed = tab_now && !game->prev_tab;
+    const bool next_container_pressed = tab_pressed && !shift_now;
+    const bool previous_container_pressed = tab_pressed && shift_now;
 
     game->prev_up = up_now;
     game->prev_down = down_now;
@@ -450,10 +458,12 @@ static void game_update(Engine *engine, void *userdata)
     game->prev_page_up = page_up_now;
     game->prev_page_down = page_down_now;
     game->prev_home = home_now;
+    game->prev_tab = tab_now;
 
     UiAction action = UI_ACTION_NONE;
-    ui_update(&game->ui, up_pressed, down_pressed, enter_pressed, back_pressed,
-              &action, game->speech_ready ? game_announce : NULL);
+    ui_update(&game->ui, up_pressed, down_pressed, next_container_pressed,
+              previous_container_pressed, enter_pressed, back_pressed, &action,
+              game->speech_ready ? game_announce : NULL);
 
     if (action == UI_ACTION_EXIT)
     {

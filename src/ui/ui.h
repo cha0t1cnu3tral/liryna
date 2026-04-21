@@ -26,7 +26,8 @@ typedef enum UiAction
 typedef struct UiState
 {
     UiScreen screen;
-    int focused_index;
+    int focused_container_index;
+    int focused_widget_index;
     UiScreen screen_stack[8];
     int screen_stack_count;
 } UiState;
@@ -35,8 +36,9 @@ typedef void (*UiAnnounceFn)(const char *text, bool interrupt);
 
 void ui_init(UiState *ui, UiAnnounceFn announce);
 void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
-               bool activate_pressed, bool back_pressed, UiAction *action,
-               UiAnnounceFn announce);
+               bool next_container_pressed, bool previous_container_pressed,
+               bool activate_pressed, bool back_pressed,
+               UiAction *action, UiAnnounceFn announce);
 UiScreen ui_screen(const UiState *ui);
 void ui_show_screen(UiState *ui, UiScreen screen, UiAnnounceFn announce);
 
