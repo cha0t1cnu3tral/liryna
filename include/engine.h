@@ -20,5 +20,6 @@ void engine_stop(Engine *engine);
 int engine_tick_count(const Engine *engine);
 float engine_delta_time(const Engine *engine);
 bool engine_key_down(const Engine *engine, SDL_Scancode key);
+SDL_Renderer *engine_renderer(Engine *engine);
 
 #endif

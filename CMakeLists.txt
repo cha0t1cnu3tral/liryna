@@ -59,6 +59,17 @@ endif()
 
 set(PRISM_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/prism-sdk-v0.11.6")
 
+# Support archives extracted with an extra top-level prism-sdk-vX.Y.Z directory.
+if(NOT EXISTS "${PRISM_SDK_ROOT}/include/prism.h")
+    file(GLOB PRISM_SDK_NESTED_DIRS LIST_DIRECTORIES true
+        "${PRISM_SDK_ROOT}/prism-sdk-v*"
+    )
+    list(LENGTH PRISM_SDK_NESTED_DIRS PRISM_SDK_NESTED_DIR_COUNT)
+    if(PRISM_SDK_NESTED_DIR_COUNT EQUAL 1)
+        list(GET PRISM_SDK_NESTED_DIRS 0 PRISM_SDK_ROOT)
+    endif()
+endif()
+
 if(WIN32)
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
         set(PRISM_PLATFORM_DIR "${PRISM_SDK_ROOT}/windows/x64")
@@ -110,6 +121,9 @@ target_include_directories(liryna
 )
 
 target_link_libraries(liryna PRIVATE prism_sdk ${LIRYNA_SDL_TARGET})
+if(WIN32)
+    target_link_libraries(liryna PRIVATE winmm)
+endif()
 
 if(MSVC)
     target_compile_options(liryna PRIVATE /W4)

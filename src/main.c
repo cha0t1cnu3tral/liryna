@@ -4,6 +4,7 @@
 #include <time.h>
 
 #include "engine.h"
+#include "music_player.h"
 #include "speech.h"
 #include "ui/menu_ui.h"
 #include "world/world.h"
@@ -80,6 +81,11 @@ static void game_init(Engine *engine, void *userdata)
     game->prev_tile_y = -1;
 
     game->speech_ready = speech_init();
+    if (!music_player_start_main_menu_music())
+    {
+        fprintf(stderr, "game: main menu music failed to start\n");
+    }
+
     srand((unsigned int)time(NULL));
     ui_init(&game->ui, game->speech_ready ? game_announce : NULL);
     if (game->speech_ready)
@@ -282,6 +288,7 @@ static void game_shutdown(Engine *engine, void *userdata)
         game->world_loaded = false;
     }
 
+    music_player_shutdown();
     speech_shutdown();
 }
 
