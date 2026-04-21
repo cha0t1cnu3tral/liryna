@@ -1,0 +1,32 @@
+Water
+• 
+Ocean – deep water, coastlines
+• 
+Lake – inland water
+Flat land
+• 
+Plains – open grassland
+• 
+Forest – tree-dense land
+• 
+	Swamp – wet ground, standing water
+Dry land
+• 
+Desert – sand, little vegetation
+• 
+Dry Plains / Steppe – dry grassland
+Elevated land
+• 
+Hills – rolling terrain
+• 
+Mountains – steep high terrain
+Cold regions
+• 
+Tundra – cold flat land
+• 
+Snowy Mountains – high cold terrain
+Transitional
+• 
+Coast – sand/shore where land meets ocean
+• 
+River – flowing water biome (special case)
