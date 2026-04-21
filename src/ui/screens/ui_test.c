@@ -47,8 +47,8 @@ static const UiWidget k_navigation_widgets[] = {
 };
 
 static const UiWidget k_test_containers[] = {
-    UI_VERTICAL_CONTAINER("Basic widgets", k_basic_widgets),
-    UI_VERTICAL_CONTAINER("Value widgets", k_value_widgets),
+    UI_VERTICAL_CONTAINER("Basic controls", k_basic_widgets),
+    UI_VERTICAL_CONTAINER("Adjustable values", k_value_widgets),
     UI_GRID_CONTAINER("Button grid", k_grid_widgets, 3),
     UI_VERTICAL_CONTAINER("Navigation", k_navigation_widgets),
 };

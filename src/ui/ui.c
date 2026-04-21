@@ -553,6 +553,39 @@ static void ui_announce_focus(const UiState *ui, UiAnnounceFn announce, bool int
     announce(message, interrupt);
 }
 
+static void ui_announce_container(const UiState *ui, UiAnnounceFn announce,
+                                  bool interrupt)
+{
+    if (!ui_is_valid(ui) || announce == NULL)
+    {
+        return;
+    }
+
+    const UiScreenDefinition *screen = ui_get_screen_definition(ui->screen);
+    if (screen == NULL)
+    {
+        return;
+    }
+
+    const UiWidget *container = ui_get_focused_container(ui, screen);
+    if (container == NULL || container == screen->root ||
+        container->label == NULL || container->label[0] == '\0')
+    {
+        return;
+    }
+
+    char message[96];
+    snprintf(message, sizeof(message), "%s.", container->label);
+    announce(message, interrupt);
+}
+
+static void ui_announce_container_and_focus(const UiState *ui, UiAnnounceFn announce,
+                                            bool interrupt)
+{
+    ui_announce_container(ui, announce, interrupt);
+    ui_announce_focus(ui, announce, false);
+}
+
 static void ui_announce_screen(const UiState *ui, UiAnnounceFn announce)
 {
     if (!ui_is_valid(ui) || announce == NULL)
@@ -569,7 +602,7 @@ static void ui_announce_screen(const UiState *ui, UiAnnounceFn announce)
     char message[96];
     snprintf(message, sizeof(message), "%s.", screen->title);
     announce(message, true);
-    ui_announce_focus(ui, announce, false);
+    ui_announce_container_and_focus(ui, announce, false);
 }
 
 static void ui_reset_focus(UiState *ui)
@@ -751,7 +784,7 @@ void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
             ui->focused_container_index = 0;
         }
         ui->focused_widget_index = 0;
-        ui_announce_focus(ui, announce, true);
+        ui_announce_container_and_focus(ui, announce, true);
         return;
     }
 
@@ -763,7 +796,7 @@ void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
             ui->focused_container_index = container_count - 1;
         }
         ui->focused_widget_index = 0;
-        ui_announce_focus(ui, announce, true);
+        ui_announce_container_and_focus(ui, announce, true);
         return;
     }
 
