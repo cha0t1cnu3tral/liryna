@@ -19,8 +19,11 @@ typedef struct Game
 
     bool prev_up;
     bool prev_down;
+    bool prev_left;
+    bool prev_right;
     bool prev_enter;
     bool prev_back;
+    bool prev_backspace;
     bool prev_c;
     bool prev_b;
     bool prev_t;
@@ -376,8 +379,11 @@ static void game_init(Engine *engine, void *userdata)
     game->world_loaded = false;
     game->prev_up = false;
     game->prev_down = false;
+    game->prev_left = false;
+    game->prev_right = false;
     game->prev_enter = false;
     game->prev_back = false;
+    game->prev_backspace = false;
     game->prev_c = false;
     game->prev_b = false;
     game->prev_t = false;
@@ -418,8 +424,11 @@ static void game_update(Engine *engine, void *userdata)
 
     const bool up_now = engine_key_down(engine, SDL_SCANCODE_UP);
     const bool down_now = engine_key_down(engine, SDL_SCANCODE_DOWN);
+    const bool left_now = engine_key_down(engine, SDL_SCANCODE_LEFT);
+    const bool right_now = engine_key_down(engine, SDL_SCANCODE_RIGHT);
     const bool enter_now = engine_key_down(engine, SDL_SCANCODE_RETURN);
     const bool back_now = engine_key_down(engine, SDL_SCANCODE_ESCAPE);
+    const bool backspace_now = engine_key_down(engine, SDL_SCANCODE_BACKSPACE);
     const bool c_now = engine_key_down(engine, SDL_SCANCODE_C);
     const bool b_now = engine_key_down(engine, SDL_SCANCODE_B);
     const bool t_now = engine_key_down(engine, SDL_SCANCODE_T);
@@ -436,8 +445,11 @@ static void game_update(Engine *engine, void *userdata)
 
     const bool up_pressed = up_now && !game->prev_up;
     const bool down_pressed = down_now && !game->prev_down;
+    const bool left_pressed = left_now && !game->prev_left;
+    const bool right_pressed = right_now && !game->prev_right;
     const bool enter_pressed = enter_now && !game->prev_enter;
     const bool back_pressed = back_now && !game->prev_back;
+    const bool backspace_pressed = backspace_now && !game->prev_backspace;
     const bool c_pressed = c_now && !game->prev_c;
     const bool b_pressed = b_now && !game->prev_b;
     const bool t_pressed = t_now && !game->prev_t;
@@ -450,8 +462,11 @@ static void game_update(Engine *engine, void *userdata)
 
     game->prev_up = up_now;
     game->prev_down = down_now;
+    game->prev_left = left_now;
+    game->prev_right = right_now;
     game->prev_enter = enter_now;
     game->prev_back = back_now;
+    game->prev_backspace = backspace_now;
     game->prev_c = c_now;
     game->prev_b = b_now;
     game->prev_t = t_now;
@@ -461,8 +476,9 @@ static void game_update(Engine *engine, void *userdata)
     game->prev_tab = tab_now;
 
     UiAction action = UI_ACTION_NONE;
-    ui_update(&game->ui, up_pressed, down_pressed, next_container_pressed,
-              previous_container_pressed, enter_pressed, back_pressed, &action,
+    ui_update(&game->ui, up_pressed, down_pressed, left_pressed, right_pressed,
+              next_container_pressed, previous_container_pressed, enter_pressed,
+              back_pressed, backspace_pressed, engine_text_input(engine), &action,
               game->speech_ready ? game_announce : NULL);
 
     if (action == UI_ACTION_EXIT)

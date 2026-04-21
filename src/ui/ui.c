@@ -2,6 +2,7 @@
 #include "screens/screen_registry.h"
 
 #include <stdio.h>
+#include <string.h>
 
 typedef struct UiFocusSearch
 {
@@ -24,6 +25,14 @@ static const char *ui_widget_type_name(UiWidgetType type)
     {
     case UI_WIDGET_BUTTON:
         return "button";
+    case UI_WIDGET_TOGGLE:
+        return "toggle";
+    case UI_WIDGET_SLIDER:
+        return "slider";
+    case UI_WIDGET_EDIT_BOX:
+        return "edit box";
+    case UI_WIDGET_PICKER:
+        return "picker";
     case UI_WIDGET_CONTAINER:
     default:
         return "container";
@@ -50,6 +59,79 @@ static bool ui_widget_is_container(const UiWidget *widget)
     return widget != NULL && widget->type == UI_WIDGET_CONTAINER;
 }
 
+static int ui_clamp_int(int value, int min_value, int max_value)
+{
+    if (value < min_value)
+    {
+        return min_value;
+    }
+
+    if (value > max_value)
+    {
+        return max_value;
+    }
+
+    return value;
+}
+
+static bool ui_widget_value_text(const UiWidget *widget, char *out, size_t out_size)
+{
+    if (widget == NULL || out == NULL || out_size == 0)
+    {
+        return false;
+    }
+
+    out[0] = '\0';
+
+    switch (widget->type)
+    {
+    case UI_WIDGET_TOGGLE:
+        if (widget->toggle_value == NULL)
+        {
+            return false;
+        }
+        snprintf(out, out_size, "%s", *widget->toggle_value ? "on" : "off");
+        return true;
+    case UI_WIDGET_SLIDER:
+        if (widget->int_value == NULL)
+        {
+            return false;
+        }
+        snprintf(out, out_size, "%d", *widget->int_value);
+        return true;
+    case UI_WIDGET_EDIT_BOX:
+        if (widget->edit_value == NULL || widget->edit_value[0] == '\0')
+        {
+            snprintf(out, out_size, "empty");
+            return true;
+        }
+        snprintf(out, out_size, "%s", widget->edit_value);
+        return true;
+    case UI_WIDGET_PICKER:
+        if (widget->picker_options == NULL || widget->picker_index == NULL ||
+            widget->picker_option_count <= 0)
+        {
+            return false;
+        }
+        {
+            const int index = ui_clamp_int(*widget->picker_index, 0,
+                                           widget->picker_option_count - 1);
+            const char *option = widget->picker_options[index];
+            snprintf(out, out_size, "%s", option != NULL ? option : "unknown");
+        }
+        return true;
+    case UI_WIDGET_CONTAINER:
+    case UI_WIDGET_BUTTON:
+    default:
+        if (widget->value == NULL || widget->value[0] == '\0')
+        {
+            return false;
+        }
+        snprintf(out, out_size, "%s", widget->value);
+        return true;
+    }
+}
+
 static void ui_describe_widget(const UiWidget *widget, char *out, size_t out_size)
 {
     if (out == NULL || out_size == 0)
@@ -65,13 +147,15 @@ static void ui_describe_widget(const UiWidget *widget, char *out, size_t out_siz
 
     const char *label = widget->label != NULL ? widget->label : "Unnamed";
     const char *type_name = ui_widget_type_name(widget->type);
+    char value[96];
+    const bool has_value = ui_widget_value_text(widget, value, sizeof(value));
 
     if (!widget->enabled)
     {
-        if (widget->value != NULL && widget->value[0] != '\0')
+        if (has_value)
         {
             snprintf(out, out_size, "%s, %s, unavailable, %s.",
-                     label, widget->value, type_name);
+                     label, value, type_name);
         }
         else
         {
@@ -80,13 +164,147 @@ static void ui_describe_widget(const UiWidget *widget, char *out, size_t out_siz
         return;
     }
 
-    if (widget->value != NULL && widget->value[0] != '\0')
+    if (has_value)
     {
-        snprintf(out, out_size, "%s, %s, %s.", label, widget->value, type_name);
+        snprintf(out, out_size, "%s, %s, %s.", label, value, type_name);
         return;
     }
 
     snprintf(out, out_size, "%s, %s.", label, type_name);
+}
+
+static void ui_delete_last_utf8_char(char *text)
+{
+    if (text == NULL || text[0] == '\0')
+    {
+        return;
+    }
+
+    size_t length = strlen(text);
+    if (length == 0)
+    {
+        return;
+    }
+
+    length--;
+    while (length > 0 && (((unsigned char)text[length] & 0xC0U) == 0x80U))
+    {
+        length--;
+    }
+
+    text[length] = '\0';
+}
+
+static bool ui_edit_box_append_text(const UiWidget *widget, const char *text_input)
+{
+    if (widget == NULL || widget->type != UI_WIDGET_EDIT_BOX ||
+        widget->edit_value == NULL || widget->edit_capacity == 0 ||
+        text_input == NULL || text_input[0] == '\0')
+    {
+        return false;
+    }
+
+    const size_t current_length = strlen(widget->edit_value);
+    if (current_length >= widget->edit_capacity - 1)
+    {
+        return false;
+    }
+
+    const size_t available = widget->edit_capacity - current_length - 1;
+    strncat(widget->edit_value, text_input, available);
+    widget->edit_value[widget->edit_capacity - 1] = '\0';
+    return true;
+}
+
+static bool ui_edit_box_backspace(const UiWidget *widget)
+{
+    if (widget == NULL || widget->type != UI_WIDGET_EDIT_BOX ||
+        widget->edit_value == NULL || widget->edit_value[0] == '\0')
+    {
+        return false;
+    }
+
+    ui_delete_last_utf8_char(widget->edit_value);
+    return true;
+}
+
+static void ui_announce_widget_value(const UiWidget *widget, UiAnnounceFn announce,
+                                     bool interrupt)
+{
+    if (widget == NULL || announce == NULL)
+    {
+        return;
+    }
+
+    char value[96];
+    if (!ui_widget_value_text(widget, value, sizeof(value)))
+    {
+        return;
+    }
+
+    char message[112];
+    snprintf(message, sizeof(message), "%s.", value);
+    announce(message, interrupt);
+}
+
+static bool ui_adjust_widget_value(const UiWidget *widget, int delta, bool activate)
+{
+    if (widget == NULL || !widget->enabled)
+    {
+        return false;
+    }
+
+    switch (widget->type)
+    {
+    case UI_WIDGET_TOGGLE:
+        if (widget->toggle_value == NULL)
+        {
+            return false;
+        }
+
+        if (activate || delta == 0)
+        {
+            *widget->toggle_value = !*widget->toggle_value;
+        }
+        else
+        {
+            *widget->toggle_value = delta > 0;
+        }
+        return true;
+    case UI_WIDGET_SLIDER:
+        if (widget->int_value == NULL || delta == 0)
+        {
+            return false;
+        }
+        {
+            const int step = widget->step_value > 0 ? widget->step_value : 1;
+            const int next_value = *widget->int_value + (delta * step);
+            *widget->int_value = ui_clamp_int(next_value, widget->min_value,
+                                              widget->max_value);
+        }
+        return true;
+    case UI_WIDGET_PICKER:
+        if (widget->picker_index == NULL || widget->picker_option_count <= 0 ||
+            delta == 0)
+        {
+            return false;
+        }
+        *widget->picker_index += delta;
+        while (*widget->picker_index < 0)
+        {
+            *widget->picker_index += widget->picker_option_count;
+        }
+        while (*widget->picker_index >= widget->picker_option_count)
+        {
+            *widget->picker_index -= widget->picker_option_count;
+        }
+        return true;
+    case UI_WIDGET_EDIT_BOX:
+    case UI_WIDGET_CONTAINER:
+    case UI_WIDGET_BUTTON:
+    default:
+        return false;
+    }
 }
 
 static int ui_count_focusable_widgets(const UiWidget *widget)
@@ -357,6 +575,9 @@ static bool ui_handle_internal_action(UiState *ui, UiAction selected_action,
     case UI_ACTION_OPEN_HELP:
         ui_push_screen(ui, UI_SCREEN_HELP, announce);
         return true;
+    case UI_ACTION_OPEN_UI_TEST:
+        ui_push_screen(ui, UI_SCREEN_TEST, announce);
+        return true;
     case UI_ACTION_BACK:
         ui_pop_screen(ui, announce);
         return true;
@@ -388,8 +609,10 @@ void ui_init(UiState *ui, UiAnnounceFn announce)
 }
 
 void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
+               bool left_pressed, bool right_pressed,
                bool next_container_pressed, bool previous_container_pressed,
                bool activate_pressed, bool back_pressed,
+               bool backspace_pressed, const char *text_input,
                UiAction *action, UiAnnounceFn announce)
 {
     if (action != NULL)
@@ -496,6 +719,44 @@ void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
         ui_announce_focus(ui, announce, true);
     }
 
+    const UiWidget *widget = ui_get_focused_widget(ui, screen);
+
+    if (text_input != NULL && text_input[0] != '\0')
+    {
+        if (ui_edit_box_append_text(widget, text_input))
+        {
+            ui_announce_widget_value(widget, announce, true);
+            return;
+        }
+    }
+
+    if (backspace_pressed)
+    {
+        if (ui_edit_box_backspace(widget))
+        {
+            ui_announce_widget_value(widget, announce, true);
+            return;
+        }
+    }
+
+    if (left_pressed)
+    {
+        if (ui_adjust_widget_value(widget, -1, false))
+        {
+            ui_announce_widget_value(widget, announce, true);
+            return;
+        }
+    }
+
+    if (right_pressed)
+    {
+        if (ui_adjust_widget_value(widget, 1, false))
+        {
+            ui_announce_widget_value(widget, announce, true);
+            return;
+        }
+    }
+
     if (back_pressed)
     {
         ui_pop_screen(ui, announce);
@@ -507,10 +768,15 @@ void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
         return;
     }
 
-    const UiWidget *widget = ui_get_focused_widget(ui, screen);
     if (widget == NULL || !widget->enabled)
     {
         ui_announce_focus(ui, announce, true);
+        return;
+    }
+
+    if (ui_adjust_widget_value(widget, 0, true))
+    {
+        ui_announce_widget_value(widget, announce, true);
         return;
     }
 

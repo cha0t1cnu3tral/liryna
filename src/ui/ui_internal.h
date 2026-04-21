@@ -9,6 +9,10 @@ typedef enum UiWidgetType
 {
     UI_WIDGET_CONTAINER = 0,
     UI_WIDGET_BUTTON,
+    UI_WIDGET_TOGGLE,
+    UI_WIDGET_SLIDER,
+    UI_WIDGET_EDIT_BOX,
+    UI_WIDGET_PICKER,
 } UiWidgetType;
 
 typedef enum UiContainerDirection
@@ -30,6 +34,16 @@ struct UiWidget
     UiContainerDirection direction;
     const UiWidget *children;
     int child_count;
+    bool *toggle_value;
+    int *int_value;
+    int min_value;
+    int max_value;
+    int step_value;
+    char *edit_value;
+    size_t edit_capacity;
+    const char *const *picker_options;
+    int picker_option_count;
+    int *picker_index;
 };
 
 typedef struct UiScreenDefinition
@@ -42,10 +56,30 @@ typedef struct UiScreenDefinition
 #define UI_ARRAY_COUNT(items) ((int)(sizeof(items) / sizeof((items)[0])))
 
 #define UI_BUTTON(label_, action_) \
-    {UI_WIDGET_BUTTON, label_, NULL, true, true, action_, UI_CONTAINER_VERTICAL, NULL, 0}
+    {.type = UI_WIDGET_BUTTON, .label = label_, .enabled = true, .focusable = true, \
+     .action = action_, .direction = UI_CONTAINER_VERTICAL}
+
+#define UI_TOGGLE(label_, value_) \
+    {.type = UI_WIDGET_TOGGLE, .label = label_, .enabled = true, .focusable = true, \
+     .direction = UI_CONTAINER_VERTICAL, .toggle_value = value_}
+
+#define UI_SLIDER(label_, value_, min_, max_, step_) \
+    {.type = UI_WIDGET_SLIDER, .label = label_, .enabled = true, .focusable = true, \
+     .direction = UI_CONTAINER_VERTICAL, .int_value = value_, .min_value = min_, \
+     .max_value = max_, .step_value = step_}
+
+#define UI_EDIT_BOX(label_, value_, capacity_) \
+    {.type = UI_WIDGET_EDIT_BOX, .label = label_, .enabled = true, .focusable = true, \
+     .direction = UI_CONTAINER_VERTICAL, .edit_value = value_, .edit_capacity = capacity_}
+
+#define UI_PICKER(label_, options_, index_) \
+    {.type = UI_WIDGET_PICKER, .label = label_, .enabled = true, .focusable = true, \
+     .direction = UI_CONTAINER_VERTICAL, .picker_options = options_, \
+     .picker_option_count = UI_ARRAY_COUNT(options_), .picker_index = index_}
 
 #define UI_VERTICAL_CONTAINER(label_, children_) \
-    {UI_WIDGET_CONTAINER, label_, NULL, true, false, UI_ACTION_NONE, \
-     UI_CONTAINER_VERTICAL, children_, UI_ARRAY_COUNT(children_)}
+    {.type = UI_WIDGET_CONTAINER, .label = label_, .enabled = true, .focusable = false, \
+     .action = UI_ACTION_NONE, .direction = UI_CONTAINER_VERTICAL, \
+     .children = children_, .child_count = UI_ARRAY_COUNT(children_)}
 
 #endif

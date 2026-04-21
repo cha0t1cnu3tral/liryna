@@ -9,5 +9,6 @@ const UiScreenDefinition *ui_main_menu_screen(void);
 const UiScreenDefinition *ui_saved_worlds_screen(void);
 const UiScreenDefinition *ui_settings_screen(void);
 const UiScreenDefinition *ui_help_screen(void);
+const UiScreenDefinition *ui_test_screen(void);
 
 #endif

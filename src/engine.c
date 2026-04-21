@@ -10,6 +10,7 @@ struct Engine
     float delta_time;
     Uint64 previous_counter;
     const bool *keyboard_state;
+    char text_input[128];
     SDL_Window *window;
     SDL_Renderer *renderer;
 };
@@ -29,6 +30,7 @@ void engine_run(const EngineCallbacks *callbacks, void *userdata)
         .delta_time = 0.0f,
         .previous_counter = SDL_GetPerformanceCounter(),
         .keyboard_state = NULL,
+        .text_input = "",
         .window = NULL,
         .renderer = NULL,
     };
@@ -50,6 +52,11 @@ void engine_run(const EngineCallbacks *callbacks, void *userdata)
         return;
     }
 
+    if (!SDL_StartTextInput(engine.window))
+    {
+        fprintf(stderr, "engine: text input start failed: %s\n", SDL_GetError());
+    }
+
     if (callbacks && callbacks->init)
     {
         callbacks->init(&engine, userdata);
@@ -57,12 +64,18 @@ void engine_run(const EngineCallbacks *callbacks, void *userdata)
 
     while (engine.running)
     {
+        engine.text_input[0] = '\0';
+
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
             if (event.type == SDL_EVENT_QUIT)
             {
                 engine_stop(&engine);
+            }
+            else if (event.type == SDL_EVENT_TEXT_INPUT && event.text.text != NULL)
+            {
+                SDL_strlcat(engine.text_input, event.text.text, sizeof(engine.text_input));
             }
         }
 
@@ -96,6 +109,7 @@ void engine_run(const EngineCallbacks *callbacks, void *userdata)
         callbacks->shutdown(&engine, userdata);
     }
 
+    SDL_StopTextInput(engine.window);
     SDL_DestroyRenderer(engine.renderer);
     SDL_DestroyWindow(engine.window);
     SDL_Quit();
@@ -127,6 +141,11 @@ bool engine_key_down(const Engine *engine, SDL_Scancode key)
     }
 
     return engine->keyboard_state[key];
+}
+
+const char *engine_text_input(const Engine *engine)
+{
+    return engine ? engine->text_input : "";
 }
 
 SDL_Renderer *engine_renderer(Engine *engine)

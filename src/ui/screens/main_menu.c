@@ -5,6 +5,7 @@ static const UiWidget k_main_menu_buttons[] = {
     UI_BUTTON("Saved worlds", UI_ACTION_OPEN_SAVED_WORLDS),
     UI_BUTTON("Settings", UI_ACTION_OPEN_SETTINGS),
     UI_BUTTON("Help", UI_ACTION_OPEN_HELP),
+    UI_BUTTON("UI test", UI_ACTION_OPEN_UI_TEST),
     UI_BUTTON("Exit", UI_ACTION_EXIT),
 };
 

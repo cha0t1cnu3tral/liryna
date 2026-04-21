@@ -10,6 +10,7 @@ typedef enum UiScreen
     UI_SCREEN_SAVED_WORLDS,
     UI_SCREEN_SETTINGS,
     UI_SCREEN_HELP,
+    UI_SCREEN_TEST,
 } UiScreen;
 
 typedef enum UiAction
@@ -20,6 +21,7 @@ typedef enum UiAction
     UI_ACTION_OPEN_SAVED_WORLDS,
     UI_ACTION_OPEN_SETTINGS,
     UI_ACTION_OPEN_HELP,
+    UI_ACTION_OPEN_UI_TEST,
     UI_ACTION_BACK,
 } UiAction;
 
@@ -36,8 +38,10 @@ typedef void (*UiAnnounceFn)(const char *text, bool interrupt);
 
 void ui_init(UiState *ui, UiAnnounceFn announce);
 void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
+               bool left_pressed, bool right_pressed,
                bool next_container_pressed, bool previous_container_pressed,
                bool activate_pressed, bool back_pressed,
+               bool backspace_pressed, const char *text_input,
                UiAction *action, UiAnnounceFn announce);
 UiScreen ui_screen(const UiState *ui);
 void ui_show_screen(UiState *ui, UiScreen screen, UiAnnounceFn announce);
