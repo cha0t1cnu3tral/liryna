@@ -72,6 +72,8 @@ bool world_init(World *world, int width, int height, int tile_size)
     world->height = height;
     world->tile_size = tile_size;
     world->tiles = NULL;
+    world->biomes = NULL;
+    world->temperatures_c = NULL;
 
     world->player_x = (width * tile_size) / 2.0f;
     world->player_y = (height * tile_size) / 2.0f;
@@ -80,6 +82,18 @@ bool world_init(World *world, int width, int height, int tile_size)
     const int tile_count = width * height;
     world->tiles = (TileId *)malloc((size_t)tile_count * sizeof(TileId));
     if (world->tiles == NULL)
+    {
+        world_shutdown(world);
+        return false;
+    }
+    world->biomes = (BiomeType *)malloc((size_t)tile_count * sizeof(BiomeType));
+    if (world->biomes == NULL)
+    {
+        world_shutdown(world);
+        return false;
+    }
+    world->temperatures_c = (float *)malloc((size_t)tile_count * sizeof(float));
+    if (world->temperatures_c == NULL)
     {
         world_shutdown(world);
         return false;
@@ -212,6 +226,53 @@ void world_render(World *world, SDL_Renderer *renderer)
     SDL_RenderFillRect(renderer, &player_rect);
 }
 
+bool world_get_player_environment(const World *world,
+                                  int *tile_x,
+                                  int *tile_y,
+                                  const TileDefinition **tile,
+                                  const BiomeDefinition **biome,
+                                  float *temperature_c)
+{
+    if (world == NULL || world->tiles == NULL || world->biomes == NULL ||
+        world->temperatures_c == NULL || world->tile_size <= 0 ||
+        world->width <= 0 || world->height <= 0)
+    {
+        return false;
+    }
+
+    const int x = (int)(world->player_x / (float)world->tile_size);
+    const int y = (int)(world->player_y / (float)world->tile_size);
+    if (x < 0 || y < 0 || x >= world->width || y >= world->height)
+    {
+        return false;
+    }
+
+    const int index = world_index_from_xy(world, x, y);
+
+    if (tile_x)
+    {
+        *tile_x = x;
+    }
+    if (tile_y)
+    {
+        *tile_y = y;
+    }
+    if (tile)
+    {
+        *tile = tiles_get_definition(world->tiles[index]);
+    }
+    if (biome)
+    {
+        *biome = biome_get_definition(world->biomes[index]);
+    }
+    if (temperature_c)
+    {
+        *temperature_c = world->temperatures_c[index];
+    }
+
+    return true;
+}
+
 void world_shutdown(World *world)
 {
     if (world == NULL)
@@ -221,6 +282,10 @@ void world_shutdown(World *world)
 
     free(world->tiles);
     world->tiles = NULL;
+    free(world->biomes);
+    world->biomes = NULL;
+    free(world->temperatures_c);
+    world->temperatures_c = NULL;
 
     world->width = 0;
     world->height = 0;

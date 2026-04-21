@@ -116,19 +116,34 @@ static const TileId g_biome_river_tiles[] = {
     TILE_WETSOIL};
 
 static const BiomeDefinition g_biome_definitions[BIOME_TYPE_COUNT] = {
-    {BIOME_OCEAN, "Ocean", "Deep water and coastlines.", g_biome_ocean_tiles, sizeof(g_biome_ocean_tiles) / sizeof(g_biome_ocean_tiles[0])},
-    {BIOME_LAKE, "Lake", "Inland standing water.", g_biome_lake_tiles, sizeof(g_biome_lake_tiles) / sizeof(g_biome_lake_tiles[0])},
-    {BIOME_PLAINS, "Plains", "Open grassland terrain.", g_biome_plains_tiles, sizeof(g_biome_plains_tiles) / sizeof(g_biome_plains_tiles[0])},
-    {BIOME_FOREST, "Forest", "Tree-dense natural land.", g_biome_forest_tiles, sizeof(g_biome_forest_tiles) / sizeof(g_biome_forest_tiles[0])},
-    {BIOME_SWAMP, "Swamp", "Wet ground and standing water.", g_biome_swamp_tiles, sizeof(g_biome_swamp_tiles) / sizeof(g_biome_swamp_tiles[0])},
-    {BIOME_DESERT, "Desert", "Dry sand with sparse vegetation.", g_biome_desert_tiles, sizeof(g_biome_desert_tiles) / sizeof(g_biome_desert_tiles[0])},
-    {BIOME_DRY_PLAINS_STEPPE, "Dry Plains / Steppe", "Dry grassland transition terrain.", g_biome_dry_plains_steppe_tiles, sizeof(g_biome_dry_plains_steppe_tiles) / sizeof(g_biome_dry_plains_steppe_tiles[0])},
-    {BIOME_HILLS, "Hills", "Rolling elevated terrain.", g_biome_hills_tiles, sizeof(g_biome_hills_tiles) / sizeof(g_biome_hills_tiles[0])},
-    {BIOME_MOUNTAINS, "Mountains", "Steep high-elevation terrain.", g_biome_mountains_tiles, sizeof(g_biome_mountains_tiles) / sizeof(g_biome_mountains_tiles[0])},
-    {BIOME_TUNDRA, "Tundra", "Cold flat terrain.", g_biome_tundra_tiles, sizeof(g_biome_tundra_tiles) / sizeof(g_biome_tundra_tiles[0])},
-    {BIOME_SNOWY_MOUNTAINS, "Snowy Mountains", "Cold high-elevation terrain.", g_biome_snowy_mountains_tiles, sizeof(g_biome_snowy_mountains_tiles) / sizeof(g_biome_snowy_mountains_tiles[0])},
-    {BIOME_COAST, "Coast", "Shoreline where land meets ocean.", g_biome_coast_tiles, sizeof(g_biome_coast_tiles) / sizeof(g_biome_coast_tiles[0])},
-    {BIOME_RIVER, "River", "Flowing water biome.", g_biome_river_tiles, sizeof(g_biome_river_tiles) / sizeof(g_biome_river_tiles[0])}};
+    {BIOME_OCEAN, "Ocean", "Deep water and coastlines.", -2.0f, 30.0f,
+     g_biome_ocean_tiles, sizeof(g_biome_ocean_tiles) / sizeof(g_biome_ocean_tiles[0])},
+    {BIOME_LAKE, "Lake", "Inland standing water.", 0.0f, 25.0f, g_biome_lake_tiles,
+     sizeof(g_biome_lake_tiles) / sizeof(g_biome_lake_tiles[0])},
+    {BIOME_PLAINS, "Plains", "Open grassland terrain.", -20.0f, 30.0f, g_biome_plains_tiles,
+     sizeof(g_biome_plains_tiles) / sizeof(g_biome_plains_tiles[0])},
+    {BIOME_FOREST, "Forest", "Tree-dense natural land.", -30.0f, 30.0f, g_biome_forest_tiles,
+     sizeof(g_biome_forest_tiles) / sizeof(g_biome_forest_tiles[0])},
+    {BIOME_SWAMP, "Swamp", "Wet ground and standing water.", 5.0f, 35.0f, g_biome_swamp_tiles,
+     sizeof(g_biome_swamp_tiles) / sizeof(g_biome_swamp_tiles[0])},
+    {BIOME_DESERT, "Desert", "Dry sand with sparse vegetation.", -4.0f, 38.0f,
+     g_biome_desert_tiles, sizeof(g_biome_desert_tiles) / sizeof(g_biome_desert_tiles[0])},
+    {BIOME_DRY_PLAINS_STEPPE, "Dry Plains / Steppe", "Dry grassland transition terrain.",
+     -10.0f, 35.0f, g_biome_dry_plains_steppe_tiles,
+     sizeof(g_biome_dry_plains_steppe_tiles) / sizeof(g_biome_dry_plains_steppe_tiles[0])},
+    {BIOME_HILLS, "Hills", "Rolling elevated terrain.", -10.0f, 25.0f, g_biome_hills_tiles,
+     sizeof(g_biome_hills_tiles) / sizeof(g_biome_hills_tiles[0])},
+    {BIOME_MOUNTAINS, "Mountains", "Steep high-elevation terrain.", -20.0f, 15.0f,
+     g_biome_mountains_tiles, sizeof(g_biome_mountains_tiles) / sizeof(g_biome_mountains_tiles[0])},
+    {BIOME_TUNDRA, "Tundra", "Cold flat terrain.", -40.0f, 18.0f, g_biome_tundra_tiles,
+     sizeof(g_biome_tundra_tiles) / sizeof(g_biome_tundra_tiles[0])},
+    {BIOME_SNOWY_MOUNTAINS, "Snowy Mountains", "Cold high-elevation terrain.", -40.0f, 5.0f,
+     g_biome_snowy_mountains_tiles,
+     sizeof(g_biome_snowy_mountains_tiles) / sizeof(g_biome_snowy_mountains_tiles[0])},
+    {BIOME_COAST, "Coast", "Shoreline where land meets ocean.", -2.0f, 30.0f, g_biome_coast_tiles,
+     sizeof(g_biome_coast_tiles) / sizeof(g_biome_coast_tiles[0])},
+    {BIOME_RIVER, "River", "Flowing water biome.", 0.0f, 25.0f, g_biome_river_tiles,
+     sizeof(g_biome_river_tiles) / sizeof(g_biome_river_tiles[0])}};
 
 size_t biome_count(void)
 {

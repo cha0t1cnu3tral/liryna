@@ -5,11 +5,27 @@
 
 #include "engine.h"
 #include "speech.h"
+#include "ui/menu_ui.h"
 #include "world/world.h"
 
 typedef struct Game
 {
+    UiState ui;
     World world;
+    bool world_loaded;
+    bool speech_ready;
+
+    bool prev_up;
+    bool prev_down;
+    bool prev_enter;
+    bool prev_back;
+    bool prev_c;
+    bool prev_b;
+    bool prev_t;
+
+    bool has_prev_tile;
+    int prev_tile_x;
+    int prev_tile_y;
 } Game;
 
 static void game_announce(const char *text, bool interrupt)
@@ -20,35 +36,58 @@ static void game_announce(const char *text, bool interrupt)
     }
 }
 
-static void game_init(Engine *engine, void *userdata)
+static bool game_create_new_world(Game *game)
 {
-    Game *game = userdata;
-
-    bool speech_ready = speech_init();
-
-    if (speech_ready)
+    if (game == NULL)
     {
-        game_announce("Life Simulation Engine.", true);
-        game_announce("Initializing.", false);
+        return false;
     }
 
-    srand((unsigned int)time(NULL));
+    if (game->world_loaded)
+    {
+        world_shutdown(&game->world);
+        game->world_loaded = false;
+    }
 
     if (!world_init(&game->world, 40, 22, 32))
     {
         fprintf(stderr, "game: world initialization failed\n");
-        engine_stop(engine);
-        return;
+        game_announce("New world generation failed.", true);
+        return false;
     }
 
-    if (speech_ready)
+    game->world_loaded = true;
+    game->has_prev_tile = false;
+    game_announce("New world ready.", false);
+    return true;
+}
+
+static void game_init(Engine *engine, void *userdata)
+{
+    Game *game = userdata;
+    (void)engine;
+
+    game->world_loaded = false;
+    game->prev_up = false;
+    game->prev_down = false;
+    game->prev_enter = false;
+    game->prev_back = false;
+    game->prev_c = false;
+    game->prev_b = false;
+    game->prev_t = false;
+    game->has_prev_tile = false;
+    game->prev_tile_x = -1;
+    game->prev_tile_y = -1;
+
+    game->speech_ready = speech_init();
+    srand((unsigned int)time(NULL));
+    ui_init(&game->ui, game->speech_ready ? game_announce : NULL);
+    if (game->speech_ready)
     {
         char message[128];
         snprintf(message, sizeof(message), "Speech backend: %s.",
                  speech_backend_name());
         game_announce(message, false);
-        game_announce("Ready.", false);
-        speech_wait(3000);
     }
 }
 
@@ -56,7 +95,54 @@ static void game_update(Engine *engine, void *userdata)
 {
     Game *game = userdata;
 
-    int tick_count = engine_tick_count(engine);
+    const bool up_now = engine_key_down(engine, SDL_SCANCODE_UP);
+    const bool down_now = engine_key_down(engine, SDL_SCANCODE_DOWN);
+    const bool enter_now = engine_key_down(engine, SDL_SCANCODE_RETURN);
+    const bool back_now = engine_key_down(engine, SDL_SCANCODE_ESCAPE);
+    const bool c_now = engine_key_down(engine, SDL_SCANCODE_C);
+    const bool b_now = engine_key_down(engine, SDL_SCANCODE_B);
+    const bool t_now = engine_key_down(engine, SDL_SCANCODE_T);
+
+    const bool up_pressed = up_now && !game->prev_up;
+    const bool down_pressed = down_now && !game->prev_down;
+    const bool enter_pressed = enter_now && !game->prev_enter;
+    const bool back_pressed = back_now && !game->prev_back;
+    const bool c_pressed = c_now && !game->prev_c;
+    const bool b_pressed = b_now && !game->prev_b;
+    const bool t_pressed = t_now && !game->prev_t;
+
+    game->prev_up = up_now;
+    game->prev_down = down_now;
+    game->prev_enter = enter_now;
+    game->prev_back = back_now;
+    game->prev_c = c_now;
+    game->prev_b = b_now;
+    game->prev_t = t_now;
+
+    UiAction action = UI_ACTION_NONE;
+    ui_update(&game->ui, up_pressed, down_pressed, enter_pressed, back_pressed,
+              &action, game->speech_ready ? game_announce : NULL);
+
+    if (action == UI_ACTION_EXIT)
+    {
+        engine_stop(engine);
+        return;
+    }
+
+    if (action == UI_ACTION_NEW_WORLD)
+    {
+        if (!game_create_new_world(game))
+        {
+            ui_init(&game->ui, game->speech_ready ? game_announce : NULL);
+        }
+    }
+
+    if (ui_screen(&game->ui) != UI_SCREEN_WORLD || !game->world_loaded)
+    {
+        game->has_prev_tile = false;
+        return;
+    }
+
     float move_x = 0.0f;
     float move_y = 0.0f;
 
@@ -86,25 +172,96 @@ static void game_update(Engine *engine, void *userdata)
 
     world_update(&game->world, engine_delta_time(engine), move_x, move_y);
 
-    if ((tick_count % 60) == 0)
+    int tile_x = 0;
+    int tile_y = 0;
+    const TileDefinition *tile = NULL;
+    const BiomeDefinition *biome = NULL;
+    float temperature_c = 0.0f;
+    const bool has_tile = world_get_player_environment(&game->world, &tile_x, &tile_y, &tile,
+                                                       &biome, &temperature_c);
+    if (has_tile)
     {
-        printf("Simulation tick: %d\n", tick_count);
+        const bool tile_changed = !game->has_prev_tile ||
+                                  tile_x != game->prev_tile_x ||
+                                  tile_y != game->prev_tile_y;
+        if (tile_changed)
+        {
+            char message[160];
+            snprintf(message, sizeof(message), "Tile %s. X %d Y %d.",
+                     tile != NULL && tile->name != NULL ? tile->name : "Unknown",
+                     tile_x, tile_y);
+            game_announce(message, true);
+
+            game->prev_tile_x = tile_x;
+            game->prev_tile_y = tile_y;
+            game->has_prev_tile = true;
+        }
     }
 
-    if (tick_count == 1 || tick_count == 300 || tick_count == 600)
+    if (c_pressed)
     {
-        char message[64];
-        snprintf(message, sizeof(message), "Simulation tick %d.", tick_count);
-        game_announce(message, false);
+        char message[160];
+        if (has_tile)
+        {
+            snprintf(message, sizeof(message), "Coordinates X %d Y %d. Tile %s.",
+                     tile_x, tile_y,
+                     tile != NULL && tile->name != NULL ? tile->name : "Unknown");
+        }
+        else
+        {
+            snprintf(message, sizeof(message), "Coordinates unavailable.");
+        }
+
+        game_announce(message, true);
+    }
+
+    if (b_pressed)
+    {
+        char message[196];
+        if (has_tile && biome != NULL)
+        {
+            snprintf(message, sizeof(message), "Biome %s. Range %.0f to %.0f Celsius.",
+                     biome->name, biome->min_temperature_c, biome->max_temperature_c);
+        }
+        else
+        {
+            snprintf(message, sizeof(message), "Biome unavailable.");
+        }
+
+        game_announce(message, true);
+    }
+
+    if (t_pressed)
+    {
+        char message[196];
+        if (has_tile && biome != NULL)
+        {
+            snprintf(message, sizeof(message),
+                     "Temperature %.1f Celsius in %s. Expected range %.0f to %.0f Celsius.",
+                     temperature_c, biome->name, biome->min_temperature_c,
+                     biome->max_temperature_c);
+        }
+        else
+        {
+            snprintf(message, sizeof(message), "Temperature unavailable.");
+        }
+
+        game_announce(message, true);
     }
 }
 
 static void game_render(Engine *engine, void *userdata)
 {
-    (void)engine;
-    (void)userdata;
+    Game *game = userdata;
+    SDL_Renderer *renderer = engine_renderer(engine);
 
-    printf("Rendering world state...\n");
+    if (ui_screen(&game->ui) == UI_SCREEN_WORLD && game->world_loaded)
+    {
+        world_render(&game->world, renderer);
+        return;
+    }
+
+    ui_render(&game->ui, renderer);
 }
 
 static void game_shutdown(Engine *engine, void *userdata)
@@ -113,12 +270,19 @@ static void game_shutdown(Engine *engine, void *userdata)
 
     Game *game = userdata;
 
-    game_announce("Shutting down.", true);
-    speech_wait(1500);
-    speech_shutdown();
-    world_shutdown(&game->world);
+    if (game->speech_ready)
+    {
+        game_announce("Shutting down.", true);
+        speech_wait(800);
+    }
 
-    printf("Shutting down.\n");
+    if (game->world_loaded)
+    {
+        world_shutdown(&game->world);
+        game->world_loaded = false;
+    }
+
+    speech_shutdown();
 }
 
 int main(void)

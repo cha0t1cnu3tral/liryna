@@ -11,6 +11,7 @@ struct Engine
     Uint64 previous_counter;
     const bool *keyboard_state;
     SDL_Window *window;
+    SDL_Renderer *renderer;
 };
 
 void engine_run(const EngineCallbacks *callbacks, void *userdata)
@@ -29,12 +30,22 @@ void engine_run(const EngineCallbacks *callbacks, void *userdata)
         .previous_counter = SDL_GetPerformanceCounter(),
         .keyboard_state = NULL,
         .window = NULL,
+        .renderer = NULL,
     };
 
     engine.window = SDL_CreateWindow("Liryna", 0, 0, SDL_WINDOW_FULLSCREEN);
     if (!engine.window)
     {
         fprintf(stderr, "engine: window creation failed: %s\n", SDL_GetError());
+        SDL_Quit();
+        return;
+    }
+
+    engine.renderer = SDL_CreateRenderer(engine.window, NULL);
+    if (!engine.renderer)
+    {
+        fprintf(stderr, "engine: renderer creation failed: %s\n", SDL_GetError());
+        SDL_DestroyWindow(engine.window);
         SDL_Quit();
         return;
     }
@@ -75,6 +86,8 @@ void engine_run(const EngineCallbacks *callbacks, void *userdata)
             callbacks->render(&engine, userdata);
         }
 
+        SDL_RenderPresent(engine.renderer);
+
         SDL_Delay(1);
     }
 
@@ -83,6 +96,7 @@ void engine_run(const EngineCallbacks *callbacks, void *userdata)
         callbacks->shutdown(&engine, userdata);
     }
 
+    SDL_DestroyRenderer(engine.renderer);
     SDL_DestroyWindow(engine.window);
     SDL_Quit();
 }
@@ -113,4 +127,9 @@ bool engine_key_down(const Engine *engine, SDL_Scancode key)
     }
 
     return engine->keyboard_state[key];
+}
+
+SDL_Renderer *engine_renderer(Engine *engine)
+{
+    return engine ? engine->renderer : NULL;
 }

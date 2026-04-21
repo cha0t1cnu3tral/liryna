@@ -29,6 +29,8 @@ typedef struct BiomeDefinition
     BiomeType type;
     const char *name;
     const char *description;
+    float min_temperature_c;
+    float max_temperature_c;
     const TileId *tiles;
     size_t tile_count;
 } BiomeDefinition;

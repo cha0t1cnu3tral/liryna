@@ -20,6 +20,11 @@ static float world_generation_smoothstep(float t)
     return t * t * (3.0f - (2.0f * t));
 }
 
+static float world_generation_temperature_to_celsius(float normalized_temperature)
+{
+    return -40.0f + (normalized_temperature * 85.0f);
+}
+
 static unsigned int world_generation_hash_u32(unsigned int value)
 {
     value ^= value >> 16;
@@ -85,7 +90,7 @@ static float world_generation_fractal_noise(float x, float y, unsigned int seed,
     return value / total_amplitude;
 }
 
-static BiomeType world_generation_choose_biome(float elevation, float moisture, float temperature)
+static BiomeType world_generation_choose_biome(float elevation, float moisture, float temperature_c)
 {
     if (elevation < 0.26f)
     {
@@ -102,7 +107,7 @@ static BiomeType world_generation_choose_biome(float elevation, float moisture, 
         return BIOME_LAKE;
     }
 
-    if (temperature < 0.25f)
+    if (temperature_c <= 5.0f)
     {
         if (elevation > 0.72f)
         {
@@ -123,7 +128,7 @@ static BiomeType world_generation_choose_biome(float elevation, float moisture, 
 
     if (moisture > 0.72f)
     {
-        if (temperature > 0.55f)
+        if (temperature_c > 12.0f)
         {
             return BIOME_SWAMP;
         }
@@ -132,7 +137,7 @@ static BiomeType world_generation_choose_biome(float elevation, float moisture, 
 
     if (moisture < 0.30f)
     {
-        if (temperature > 0.62f)
+        if (temperature_c > 24.0f)
         {
             return BIOME_DESERT;
         }
@@ -147,11 +152,48 @@ static BiomeType world_generation_choose_biome(float elevation, float moisture, 
     return BIOME_PLAINS;
 }
 
+static bool world_generation_tile_is_frozen(TileId tile_id)
+{
+    return tile_id == TILE_SNOW || tile_id == TILE_ICE || tile_id == TILE_FROZENGROUND ||
+           tile_id == TILE_PERMAFROST;
+}
+
+static BiomeType world_generation_adjust_biome_for_temperature(BiomeType biome_type,
+                                                               float elevation,
+                                                               float moisture,
+                                                               float temperature_c)
+{
+    const BiomeDefinition *biome = biome_get_definition(biome_type);
+    if (biome != NULL && temperature_c >= biome->min_temperature_c &&
+        temperature_c <= biome->max_temperature_c)
+    {
+        return biome_type;
+    }
+
+    if (temperature_c <= 5.0f)
+    {
+        return elevation > 0.72f ? BIOME_SNOWY_MOUNTAINS : BIOME_TUNDRA;
+    }
+
+    if (moisture < 0.35f && temperature_c > 24.0f)
+    {
+        return BIOME_DESERT;
+    }
+
+    if (moisture > 0.72f && temperature_c > 12.0f)
+    {
+        return BIOME_SWAMP;
+    }
+
+    return BIOME_PLAINS;
+}
+
 static TileId world_generation_choose_tile_from_biome(const BiomeDefinition *biome,
                                                        int x,
                                                        int y,
                                                        unsigned int seed,
-                                                       bool require_walkable)
+                                                       bool require_walkable,
+                                                       float temperature_c)
 {
     if (biome == NULL || biome->tiles == NULL || biome->tile_count == 0)
     {
@@ -163,7 +205,19 @@ static TileId world_generation_choose_tile_from_biome(const BiomeDefinition *bio
 
     if (!require_walkable)
     {
-        return biome->tiles[hash % biome->tile_count];
+        const TileId candidate = biome->tiles[hash % biome->tile_count];
+        if (temperature_c > 2.0f && world_generation_tile_is_frozen(candidate))
+        {
+            for (size_t i = 0; i < biome->tile_count; i++)
+            {
+                const TileId replacement = biome->tiles[(hash + (unsigned int)i) % biome->tile_count];
+                if (!world_generation_tile_is_frozen(replacement))
+                {
+                    return replacement;
+                }
+            }
+        }
+        return candidate;
     }
 
     size_t walkable_count = 0;
@@ -188,7 +242,8 @@ static TileId world_generation_choose_tile_from_biome(const BiomeDefinition *bio
         const TileDefinition *tile = tiles_get_definition(biome->tiles[i]);
         if (tile != NULL && tile->walkable && !tile->blocks_land_movement)
         {
-            if (seen == choice)
+            const bool frozen_tile = world_generation_tile_is_frozen(biome->tiles[i]);
+            if (seen == choice && !(temperature_c > 2.0f && frozen_tile))
             {
                 return biome->tiles[i];
             }
@@ -196,12 +251,29 @@ static TileId world_generation_choose_tile_from_biome(const BiomeDefinition *bio
         }
     }
 
+    for (size_t i = 0; i < biome->tile_count; i++)
+    {
+        const TileDefinition *tile = tiles_get_definition(biome->tiles[i]);
+        if (tile == NULL || !tile->walkable || tile->blocks_land_movement)
+        {
+            continue;
+        }
+
+        if (temperature_c > 2.0f && world_generation_tile_is_frozen(biome->tiles[i]))
+        {
+            continue;
+        }
+
+        return biome->tiles[i];
+    }
+
     return TILE_GRASS;
 }
 
 bool world_generate_procedural(World *world, unsigned int seed)
 {
-    if (world == NULL || world->tiles == NULL || world->width <= 0 || world->height <= 0)
+    if (world == NULL || world->tiles == NULL || world->biomes == NULL ||
+        world->temperatures_c == NULL || world->width <= 0 || world->height <= 0)
     {
         return false;
     }
@@ -244,16 +316,21 @@ bool world_generate_procedural(World *world, unsigned int seed)
                 elevation = 1.0f;
             }
 
-            const BiomeType biome_type =
-                world_generation_choose_biome(elevation, moisture, temperature);
+            const float temperature_c = world_generation_temperature_to_celsius(temperature);
+            BiomeType biome_type = world_generation_choose_biome(elevation, moisture, temperature_c);
+            biome_type = world_generation_adjust_biome_for_temperature(
+                biome_type, elevation, moisture, temperature_c);
             const BiomeDefinition *biome = biome_get_definition(biome_type);
 
             const bool is_water_biome = biome_type == BIOME_OCEAN || biome_type == BIOME_LAKE ||
                                         biome_type == BIOME_RIVER || biome_type == BIOME_COAST;
             const TileId tile_id = world_generation_choose_tile_from_biome(
-                biome, x, y, seed + 131U, !is_water_biome);
+                biome, x, y, seed + 131U, !is_water_biome, temperature_c);
 
-            world->tiles[world_generation_index_from_xy(world, x, y)] = tile_id;
+            const int index = world_generation_index_from_xy(world, x, y);
+            world->tiles[index] = tile_id;
+            world->biomes[index] = biome_type;
+            world->temperatures_c[index] = temperature_c;
         }
     }
 
