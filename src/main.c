@@ -6,7 +6,7 @@
 #include "engine.h"
 #include "music_player.h"
 #include "speech.h"
-#include "ui/menu_ui.h"
+#include "ui/ui.h"
 #include "world/world.h"
 
 typedef struct Game
@@ -138,13 +138,20 @@ static void game_update(Engine *engine, void *userdata)
 
     if (action == UI_ACTION_EXIT)
     {
+        game_announce("Exiting.", true);
         engine_stop(engine);
         return;
     }
 
     if (action == UI_ACTION_NEW_WORLD)
     {
-        if (!game_create_new_world(game))
+        game_announce("Generating new world.", true);
+        if (game_create_new_world(game))
+        {
+            ui_show_screen(&game->ui, UI_SCREEN_WORLD,
+                           game->speech_ready ? game_announce : NULL);
+        }
+        else
         {
             ui_init(&game->ui, game->speech_ready ? game_announce : NULL);
         }
@@ -277,7 +284,8 @@ static void game_render(Engine *engine, void *userdata)
         return;
     }
 
-    ui_render(&game->ui, renderer);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
 }
 
 static void game_shutdown(Engine *engine, void *userdata)
