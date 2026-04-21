@@ -2,6 +2,9 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <time.h>
+
+#include "world_generation.h"
 
 static int world_index_from_xy(const World *world, int x, int y)
 {
@@ -82,21 +85,19 @@ bool world_init(World *world, int width, int height, int tile_size)
         return false;
     }
 
-    for (int i = 0; i < tile_count; i++)
+    const unsigned int seed = (unsigned int)time(NULL);
+    if (!world_generate_procedural(world, seed))
     {
-        world->tiles[i] = TILE_GRASS;
+        world_shutdown(world);
+        return false;
     }
 
-    for (int x = 0; x < width; x++)
+    int spawn_tile_x = width / 2;
+    int spawn_tile_y = height / 2;
+    if (world_find_spawn_tile(world, &spawn_tile_x, &spawn_tile_y))
     {
-        world->tiles[world_index_from_xy(world, x, 0)] = TILE_SHALLOWWATER;
-        world->tiles[world_index_from_xy(world, x, height - 1)] = TILE_SHALLOWWATER;
-    }
-
-    for (int y = 0; y < height; y++)
-    {
-        world->tiles[world_index_from_xy(world, 0, y)] = TILE_SHALLOWWATER;
-        world->tiles[world_index_from_xy(world, width - 1, y)] = TILE_SHALLOWWATER;
+        world->player_x = (float)(spawn_tile_x * tile_size);
+        world->player_y = (float)(spawn_tile_y * tile_size);
     }
 
     return true;
@@ -132,8 +133,8 @@ void world_update(World *world, float delta_time, float move_x, float move_y)
         world->player_y = next_y;
     }
 
-    float max_x = (world->width * world->tile_size) - world->tile_size;
-    float max_y = (world->height * world->tile_size) - world->tile_size;
+    float max_x = ((float)(world->width * world->tile_size)) - (float)world->tile_size;
+    float max_y = ((float)(world->height * world->tile_size)) - (float)world->tile_size;
 
     if (max_x < 0.0f)
     {
