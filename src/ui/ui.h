@@ -1,29 +1,34 @@
-#ifndef LIRYNA_MENU_UI_H
-#define LIRYNA_MENU_UI_H
+#ifndef LIRYNA_UI_H
+#define LIRYNA_UI_H
 
 #include <stdbool.h>
-
-#include <SDL3/SDL.h>
 
 typedef enum UiScreen
 {
     UI_SCREEN_MENU = 0,
-    UI_SCREEN_WORLD = 1,
-    UI_SCREEN_PLACEHOLDER = 2,
+    UI_SCREEN_WORLD,
+    UI_SCREEN_SAVED_WORLDS,
+    UI_SCREEN_SETTINGS,
+    UI_SCREEN_HELP,
 } UiScreen;
 
 typedef enum UiAction
 {
     UI_ACTION_NONE = 0,
-    UI_ACTION_NEW_WORLD = 1,
-    UI_ACTION_EXIT = 2,
+    UI_ACTION_NEW_WORLD,
+    UI_ACTION_EXIT,
+    UI_ACTION_OPEN_SAVED_WORLDS,
+    UI_ACTION_OPEN_SETTINGS,
+    UI_ACTION_OPEN_HELP,
+    UI_ACTION_BACK,
 } UiAction;
 
 typedef struct UiState
 {
     UiScreen screen;
-    int selected_menu_index;
-    int placeholder_index;
+    int focused_index;
+    UiScreen screen_stack[8];
+    int screen_stack_count;
 } UiState;
 
 typedef void (*UiAnnounceFn)(const char *text, bool interrupt);
@@ -33,6 +38,6 @@ void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
                bool activate_pressed, bool back_pressed, UiAction *action,
                UiAnnounceFn announce);
 UiScreen ui_screen(const UiState *ui);
-void ui_render(const UiState *ui, SDL_Renderer *renderer);
+void ui_show_screen(UiState *ui, UiScreen screen, UiAnnounceFn announce);
 
 #endif

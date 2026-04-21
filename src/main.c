@@ -6,8 +6,8 @@
 #include "engine.h"
 #include "music_player.h"
 #include "speech.h"
-#include "ui/menu_ui.h"
 #include "water_biome_audio.h"
+#include "ui/ui.h"
 #include "world/world.h"
 
 typedef struct Game
@@ -426,6 +426,8 @@ static void game_update(Engine *engine, void *userdata)
     const bool home_now = engine_key_down(engine, SDL_SCANCODE_HOME);
     const bool ctrl_now = engine_key_down(engine, SDL_SCANCODE_LCTRL) ||
                           engine_key_down(engine, SDL_SCANCODE_RCTRL);
+    const bool alt_down = engine_key_down(engine, SDL_SCANCODE_LALT) ||
+                          engine_key_down(engine, SDL_SCANCODE_RALT);
 
     const bool up_pressed = up_now && !game->prev_up;
     const bool down_pressed = down_now && !game->prev_down;
@@ -455,13 +457,20 @@ static void game_update(Engine *engine, void *userdata)
 
     if (action == UI_ACTION_EXIT)
     {
+        game_announce("Exiting.", true);
         engine_stop(engine);
         return;
     }
 
     if (action == UI_ACTION_NEW_WORLD)
     {
-        if (!game_create_new_world(game))
+        game_announce("Generating new world.", true);
+        if (game_create_new_world(game))
+        {
+            ui_show_screen(&game->ui, UI_SCREEN_WORLD,
+                           game->speech_ready ? game_announce : NULL);
+        }
+        else
         {
             ui_init(&game->ui, game->speech_ready ? game_announce : NULL);
         }
@@ -518,20 +527,9 @@ static void game_update(Engine *engine, void *userdata)
                                   tile_y != game->prev_tile_y;
         if (tile_changed)
         {
-            char message[192];
-            if (tile != NULL && tile->primary_resource != NULL && tile->resource_yield > 0)
-            {
-                snprintf(message, sizeof(message),
-                         "Tile %s. Resource %s %u. X %d Y %d.",
-                         tile->name != NULL ? tile->name : "Unknown", tile->primary_resource,
-                         (unsigned int)tile->resource_yield, tile_x, tile_y);
-            }
-            else
-            {
-                snprintf(message, sizeof(message), "Tile %s. X %d Y %d.",
-                         tile != NULL && tile->name != NULL ? tile->name : "Unknown",
-                         tile_x, tile_y);
-            }
+            char message[160];
+            snprintf(message, sizeof(message), "%s.",
+                     tile != NULL && tile->name != NULL ? tile->name : "Unknown");
             game_announce(message, true);
 
             game->prev_tile_x = tile_x;
@@ -543,15 +541,18 @@ static void game_update(Engine *engine, void *userdata)
     if (c_pressed)
     {
         char message[160];
-        if (has_tile)
+        if (has_tile && alt_down)
         {
-            snprintf(message, sizeof(message), "Coordinates X %d Y %d. Tile %s.",
-                     tile_x, tile_y,
+            snprintf(message, sizeof(message), "%s.",
                      tile != NULL && tile->name != NULL ? tile->name : "Unknown");
+        }
+        else if (has_tile)
+        {
+            snprintf(message, sizeof(message), "X %d Y %d.", tile_x, tile_y);
         }
         else
         {
-            snprintf(message, sizeof(message), "Coordinates unavailable.");
+            snprintf(message, sizeof(message), "Unavailable.");
         }
 
         game_announce(message, true);
@@ -562,12 +563,11 @@ static void game_update(Engine *engine, void *userdata)
         char message[196];
         if (has_tile && biome != NULL)
         {
-            snprintf(message, sizeof(message), "Biome %s. Range %.0f to %.0f Celsius.",
-                     biome->name, biome->min_temperature_c, biome->max_temperature_c);
+            snprintf(message, sizeof(message), "%s.", biome->name);
         }
         else
         {
-            snprintf(message, sizeof(message), "Biome unavailable.");
+            snprintf(message, sizeof(message), "Unavailable.");
         }
 
         game_announce(message, true);
@@ -576,16 +576,18 @@ static void game_update(Engine *engine, void *userdata)
     if (t_pressed)
     {
         char message[196];
-        if (has_tile && biome != NULL)
+        if (has_tile && biome != NULL && alt_down)
         {
-            snprintf(message, sizeof(message),
-                     "Temperature %.1f Celsius in %s. Expected range %.0f to %.0f Celsius.",
-                     temperature_c, biome->name, biome->min_temperature_c,
-                     biome->max_temperature_c);
+            snprintf(message, sizeof(message), "%.0f to %.0f.",
+                     biome->min_temperature_c, biome->max_temperature_c);
+        }
+        else if (has_tile && biome != NULL)
+        {
+            snprintf(message, sizeof(message), "%.1f.", temperature_c);
         }
         else
         {
-            snprintf(message, sizeof(message), "Temperature unavailable.");
+            snprintf(message, sizeof(message), "Unavailable.");
         }
 
         game_announce(message, true);
@@ -663,7 +665,8 @@ static void game_render(Engine *engine, void *userdata)
         return;
     }
 
-    ui_render(&game->ui, renderer);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
 }
 
 static void game_shutdown(Engine *engine, void *userdata)
