@@ -19,6 +19,7 @@ typedef enum UiContainerDirection
 {
     UI_CONTAINER_VERTICAL = 0,
     UI_CONTAINER_HORIZONTAL,
+    UI_CONTAINER_GRID,
 } UiContainerDirection;
 
 typedef struct UiWidget UiWidget;
@@ -34,6 +35,7 @@ struct UiWidget
     UiContainerDirection direction;
     const UiWidget *children;
     int child_count;
+    int grid_columns;
     bool *toggle_value;
     int *int_value;
     int min_value;
@@ -81,5 +83,11 @@ typedef struct UiScreenDefinition
     {.type = UI_WIDGET_CONTAINER, .label = label_, .enabled = true, .focusable = false, \
      .action = UI_ACTION_NONE, .direction = UI_CONTAINER_VERTICAL, \
      .children = children_, .child_count = UI_ARRAY_COUNT(children_)}
+
+#define UI_GRID_CONTAINER(label_, children_, columns_) \
+    {.type = UI_WIDGET_CONTAINER, .label = label_, .enabled = true, .focusable = false, \
+     .action = UI_ACTION_NONE, .direction = UI_CONTAINER_GRID, \
+     .children = children_, .child_count = UI_ARRAY_COUNT(children_), \
+     .grid_columns = columns_}
 
 #endif

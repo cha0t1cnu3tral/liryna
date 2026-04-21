@@ -32,6 +32,16 @@ static const UiWidget k_value_widgets[] = {
     UI_PICKER("Theme", k_test_theme_options, &k_test_theme_index),
 };
 
+static const UiWidget k_grid_widgets[] = {
+    UI_BUTTON("Grid one", UI_ACTION_NONE),
+    UI_BUTTON("Grid two", UI_ACTION_NONE),
+    UI_BUTTON("Grid three", UI_ACTION_NONE),
+    UI_BUTTON("Grid four", UI_ACTION_NONE),
+    UI_BUTTON("Grid five", UI_ACTION_NONE),
+    UI_BUTTON("Grid six", UI_ACTION_NONE),
+    UI_BUTTON("Grid seven", UI_ACTION_NONE),
+};
+
 static const UiWidget k_navigation_widgets[] = {
     UI_BUTTON("Back", UI_ACTION_BACK),
 };
@@ -39,6 +49,7 @@ static const UiWidget k_navigation_widgets[] = {
 static const UiWidget k_test_containers[] = {
     UI_VERTICAL_CONTAINER("Basic widgets", k_basic_widgets),
     UI_VERTICAL_CONTAINER("Value widgets", k_value_widgets),
+    UI_GRID_CONTAINER("Button grid", k_grid_widgets, 3),
     UI_VERTICAL_CONTAINER("Navigation", k_navigation_widgets),
 };
 

@@ -59,6 +59,13 @@ static bool ui_widget_is_container(const UiWidget *widget)
     return widget != NULL && widget->type == UI_WIDGET_CONTAINER;
 }
 
+static bool ui_container_is_grid(const UiWidget *container)
+{
+    return ui_widget_is_container(container) &&
+           container->direction == UI_CONTAINER_GRID &&
+           container->grid_columns > 0;
+}
+
 static int ui_clamp_int(int value, int min_value, int max_value)
 {
     if (value < min_value)
@@ -305,6 +312,67 @@ static bool ui_adjust_widget_value(const UiWidget *widget, int delta, bool activ
     default:
         return false;
     }
+}
+
+static int ui_grid_row_start(int index, int columns)
+{
+    return (index / columns) * columns;
+}
+
+static int ui_grid_row_end(int row_start, int count, int columns)
+{
+    int row_end = row_start + columns - 1;
+    if (row_end >= count)
+    {
+        row_end = count - 1;
+    }
+
+    return row_end;
+}
+
+static int ui_grid_last_index_in_column(int count, int columns, int column)
+{
+    int index = column;
+    while (index + columns < count)
+    {
+        index += columns;
+    }
+
+    return index;
+}
+
+static int ui_grid_move_left(int index, int count, int columns)
+{
+    const int row_start = ui_grid_row_start(index, columns);
+    const int row_end = ui_grid_row_end(row_start, count, columns);
+    return index > row_start ? index - 1 : row_end;
+}
+
+static int ui_grid_move_right(int index, int count, int columns)
+{
+    const int row_start = ui_grid_row_start(index, columns);
+    const int row_end = ui_grid_row_end(row_start, count, columns);
+    return index < row_end ? index + 1 : row_start;
+}
+
+static int ui_grid_move_up(int index, int count, int columns)
+{
+    if (index - columns >= 0)
+    {
+        return index - columns;
+    }
+
+    return ui_grid_last_index_in_column(count, columns, index % columns);
+}
+
+static int ui_grid_move_down(int index, int count, int columns)
+{
+    if (index + columns < count)
+    {
+        return index + columns;
+    }
+
+    return index % columns;
 }
 
 static int ui_count_focusable_widgets(const UiWidget *widget)
@@ -697,6 +765,38 @@ void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
         ui->focused_widget_index = 0;
         ui_announce_focus(ui, announce, true);
         return;
+    }
+
+    if (ui_container_is_grid(container))
+    {
+        int next_index = ui->focused_widget_index;
+        const int columns = container->grid_columns;
+        const bool grid_navigation_pressed =
+            left_pressed || right_pressed || up_pressed || down_pressed;
+
+        if (left_pressed)
+        {
+            next_index = ui_grid_move_left(next_index, focusable_count, columns);
+        }
+        else if (right_pressed)
+        {
+            next_index = ui_grid_move_right(next_index, focusable_count, columns);
+        }
+        else if (up_pressed)
+        {
+            next_index = ui_grid_move_up(next_index, focusable_count, columns);
+        }
+        else if (down_pressed)
+        {
+            next_index = ui_grid_move_down(next_index, focusable_count, columns);
+        }
+
+        if (grid_navigation_pressed)
+        {
+            ui->focused_widget_index = next_index;
+            ui_announce_focus(ui, announce, true);
+            return;
+        }
     }
 
     if (up_pressed)
