@@ -267,6 +267,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = true,
         .movement_cost_land = 0,
+        .primary_resource = "Water",
+        .resource_yield = 3,
+        .renewable = true,
     },
     {
         .id = TILE_DEEPWATER,
@@ -279,6 +282,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = true,
         .movement_cost_land = 0,
+        .primary_resource = "Water",
+        .resource_yield = 4,
+        .renewable = true,
     },
     {
         .id = TILE_OCEANWATER,
@@ -291,6 +297,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = true,
         .movement_cost_land = 0,
+        .primary_resource = "SaltWater",
+        .resource_yield = 4,
+        .renewable = true,
     },
     {
         .id = TILE_RIVERWATER,
@@ -303,6 +312,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = true,
         .movement_cost_land = 0,
+        .primary_resource = "Water",
+        .resource_yield = 4,
+        .renewable = true,
     },
     {
         .id = TILE_STREAMWATER,
@@ -315,6 +327,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = true,
         .movement_cost_land = 0,
+        .primary_resource = "Water",
+        .resource_yield = 2,
+        .renewable = true,
     },
     {
         .id = TILE_SWAMPWATER,
@@ -327,6 +342,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = true,
         .movement_cost_land = 0,
+        .primary_resource = "Water",
+        .resource_yield = 2,
+        .renewable = true,
     },
     {
         .id = TILE_MARSHWATER,
@@ -339,6 +357,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = true,
         .movement_cost_land = 0,
+        .primary_resource = "Water",
+        .resource_yield = 2,
+        .renewable = true,
     },
     {
         .id = TILE_PONDWATER,
@@ -351,6 +372,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = true,
         .movement_cost_land = 0,
+        .primary_resource = "Water",
+        .resource_yield = 3,
+        .renewable = true,
     },
     {
         .id = TILE_LAKEWATER,
@@ -363,6 +387,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = true,
         .movement_cost_land = 0,
+        .primary_resource = "Water",
+        .resource_yield = 4,
+        .renewable = true,
     },
     {
         .id = TILE_WATERFOAM,
@@ -471,6 +498,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Wood",
+        .resource_yield = 8,
+        .renewable = true,
     },
     {
         .id = TILE_TREEPINE,
@@ -483,6 +513,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Wood",
+        .resource_yield = 9,
+        .renewable = true,
     },
     {
         .id = TILE_TREEBIRCH,
@@ -495,6 +528,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Wood",
+        .resource_yield = 7,
+        .renewable = true,
     },
     {
         .id = TILE_TREEPALM,
@@ -507,6 +543,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Wood",
+        .resource_yield = 6,
+        .renewable = true,
     },
     {
         .id = TILE_TREEDEAD,
@@ -519,6 +558,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Wood",
+        .resource_yield = 5,
+        .renewable = false,
     },
     {
         .id = TILE_TREEBURNT,
@@ -531,6 +573,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Charcoal",
+        .resource_yield = 4,
+        .renewable = false,
     },
     {
         .id = TILE_TREESAPLING,
@@ -543,6 +588,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Wood",
+        .resource_yield = 2,
+        .renewable = true,
     },
     {
         .id = TILE_BUSH,
@@ -555,6 +603,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Fiber",
+        .resource_yield = 3,
+        .renewable = true,
     },
     {
         .id = TILE_BERRYBUSH,
@@ -567,6 +618,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Berries",
+        .resource_yield = 3,
+        .renewable = true,
     },
     {
         .id = TILE_FLOWERPATCH,
@@ -627,6 +681,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Mushrooms",
+        .resource_yield = 3,
+        .renewable = true,
     },
     {
         .id = TILE_GIANTMUSHROOM,
@@ -639,6 +696,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Mushrooms",
+        .resource_yield = 6,
+        .renewable = true,
     },
     {
         .id = TILE_CACTUS,
@@ -651,6 +711,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "PlantFiber",
+        .resource_yield = 4,
+        .renewable = true,
     },
     {
         .id = TILE_DESERT_SHRUB,
@@ -663,6 +726,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Twigs",
+        .resource_yield = 2,
+        .renewable = true,
     },
     {
         .id = TILE_BOULDER,
@@ -675,6 +741,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Stone",
+        .resource_yield = 7,
+        .renewable = false,
     },
     {
         .id = TILE_ROCKCLUSTER,
@@ -687,6 +756,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Stone",
+        .resource_yield = 5,
+        .renewable = false,
     },
     {
         .id = TILE_LARGEROCK,
@@ -699,6 +771,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Stone",
+        .resource_yield = 10,
+        .renewable = false,
     },
     {
         .id = TILE_CAVEENTRANCE,
@@ -711,6 +786,9 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .requires_foundation = false,
         .is_liquid = false,
         .movement_cost_land = 0,
+        .primary_resource = "Ore",
+        .resource_yield = 8,
+        .renewable = false,
     },
     {
         .id = TILE_WOODFOUNDATION,

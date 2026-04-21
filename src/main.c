@@ -39,6 +39,11 @@ static void game_announce(const char *text, bool interrupt)
 
 static bool game_create_new_world(Game *game)
 {
+    enum
+    {
+        WORLD_SIZE_TILES = 200,
+    };
+
     if (game == NULL)
     {
         return false;
@@ -50,7 +55,7 @@ static bool game_create_new_world(Game *game)
         game->world_loaded = false;
     }
 
-    if (!world_init(&game->world, 40, 22, 32))
+    if (!world_init(&game->world, WORLD_SIZE_TILES, WORLD_SIZE_TILES, 32))
     {
         fprintf(stderr, "game: world initialization failed\n");
         game_announce("New world generation failed.", true);
@@ -192,10 +197,20 @@ static void game_update(Engine *engine, void *userdata)
                                   tile_y != game->prev_tile_y;
         if (tile_changed)
         {
-            char message[160];
-            snprintf(message, sizeof(message), "Tile %s. X %d Y %d.",
-                     tile != NULL && tile->name != NULL ? tile->name : "Unknown",
-                     tile_x, tile_y);
+            char message[192];
+            if (tile != NULL && tile->primary_resource != NULL && tile->resource_yield > 0)
+            {
+                snprintf(message, sizeof(message),
+                         "Tile %s. Resource %s %u. X %d Y %d.",
+                         tile->name != NULL ? tile->name : "Unknown", tile->primary_resource,
+                         (unsigned int)tile->resource_yield, tile_x, tile_y);
+            }
+            else
+            {
+                snprintf(message, sizeof(message), "Tile %s. X %d Y %d.",
+                         tile != NULL && tile->name != NULL ? tile->name : "Unknown",
+                         tile_x, tile_y);
+            }
             game_announce(message, true);
 
             game->prev_tile_x = tile_x;
