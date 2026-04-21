@@ -188,6 +188,337 @@ static BiomeType world_generation_adjust_biome_for_temperature(BiomeType biome_t
     return BIOME_PLAINS;
 }
 
+static bool world_generation_is_water_biome(BiomeType biome_type)
+{
+    return biome_type == BIOME_OCEAN || biome_type == BIOME_LAKE || biome_type == BIOME_RIVER ||
+           biome_type == BIOME_COAST;
+}
+
+static bool world_generation_tile_can_host_feature(TileId tile_id)
+{
+    const TileDefinition *tile = tiles_get_definition(tile_id);
+    if (tile == NULL)
+    {
+        return false;
+    }
+
+    return tile->walkable && !tile->is_liquid && !tile->blocks_land_movement &&
+           (tile->layer == TILE_LAYER_GROUND || tile->layer == TILE_LAYER_FLOOR);
+}
+
+static bool world_generation_feature_is_valid_for_climate(TileId feature_tile, float temperature_c)
+{
+    if ((feature_tile == TILE_TREEPALM || feature_tile == TILE_CACTUS ||
+         feature_tile == TILE_DESERT_SHRUB) &&
+        temperature_c < 14.0f)
+    {
+        return false;
+    }
+
+    if (feature_tile == TILE_TREEPINE && temperature_c > 26.0f)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+static bool world_generation_base_is_sandy(TileId base_tile_id)
+{
+    return base_tile_id == TILE_SAND || base_tile_id == TILE_DESERTSAND;
+}
+
+static bool world_generation_base_is_wet(TileId base_tile_id)
+{
+    return base_tile_id == TILE_MUD || base_tile_id == TILE_WETSOIL ||
+           base_tile_id == TILE_FLOODEDGROUND || base_tile_id == TILE_CLAY ||
+           base_tile_id == TILE_MOSS || base_tile_id == TILE_FORESTFLOOR;
+}
+
+static bool world_generation_base_is_rocky(TileId base_tile_id)
+{
+    return base_tile_id == TILE_GRAVEL || base_tile_id == TILE_GRANITE ||
+           base_tile_id == TILE_BASALT || base_tile_id == TILE_LIMESTONE ||
+           base_tile_id == TILE_FROZENGROUND || base_tile_id == TILE_PERMAFROST ||
+           base_tile_id == TILE_SNOW || base_tile_id == TILE_ICE;
+}
+
+static bool world_generation_feature_allowed_in_biome(BiomeType biome_type, TileId feature_tile)
+{
+    switch (biome_type)
+    {
+    case BIOME_FOREST:
+        return feature_tile == TILE_TREEOAK || feature_tile == TILE_TREEPINE ||
+               feature_tile == TILE_TREEBIRCH || feature_tile == TILE_TREESAPLING ||
+               feature_tile == TILE_BUSH || feature_tile == TILE_BERRYBUSH ||
+               feature_tile == TILE_MUSHROOMPATCH;
+    case BIOME_PLAINS:
+        return feature_tile == TILE_TREESAPLING || feature_tile == TILE_BUSH ||
+               feature_tile == TILE_BERRYBUSH || feature_tile == TILE_FLOWERPATCH;
+    case BIOME_SWAMP:
+        return feature_tile == TILE_TREEDEAD || feature_tile == TILE_VINES ||
+               feature_tile == TILE_VINEPATCH || feature_tile == TILE_MUSHROOMPATCH ||
+               feature_tile == TILE_BUSH;
+    case BIOME_DESERT:
+        return feature_tile == TILE_CACTUS || feature_tile == TILE_DESERT_SHRUB ||
+               feature_tile == TILE_TREEDEAD;
+    case BIOME_DRY_PLAINS_STEPPE:
+        return feature_tile == TILE_DESERT_SHRUB || feature_tile == TILE_TALLWEEDS ||
+               feature_tile == TILE_BUSH;
+    case BIOME_HILLS:
+        return feature_tile == TILE_TREEOAK || feature_tile == TILE_BUSH ||
+               feature_tile == TILE_ROCKCLUSTER || feature_tile == TILE_BOULDER;
+    case BIOME_MOUNTAINS:
+        return feature_tile == TILE_ROCKCLUSTER || feature_tile == TILE_BOULDER ||
+               feature_tile == TILE_LARGEROCK || feature_tile == TILE_CAVEENTRANCE;
+    case BIOME_TUNDRA:
+        return feature_tile == TILE_TREEDEAD || feature_tile == TILE_ROCKCLUSTER ||
+               feature_tile == TILE_BOULDER;
+    case BIOME_SNOWY_MOUNTAINS:
+        return feature_tile == TILE_BOULDER || feature_tile == TILE_LARGEROCK ||
+               feature_tile == TILE_ROCKCLUSTER;
+    case BIOME_COAST:
+        return feature_tile == TILE_TREEPALM || feature_tile == TILE_BUSH ||
+               feature_tile == TILE_ROCKCLUSTER;
+    case BIOME_OCEAN:
+    case BIOME_LAKE:
+    case BIOME_RIVER:
+    case BIOME_TYPE_COUNT:
+    default:
+        return false;
+    }
+}
+
+static bool world_generation_feature_allowed_on_base(TileId feature_tile, TileId base_tile_id)
+{
+    if (!world_generation_tile_can_host_feature(base_tile_id))
+    {
+        return false;
+    }
+
+    switch (feature_tile)
+    {
+    case TILE_TREEOAK:
+    case TILE_TREEBIRCH:
+    case TILE_TREESAPLING:
+    case TILE_BUSH:
+    case TILE_BERRYBUSH:
+    case TILE_FLOWERPATCH:
+    case TILE_TALLWEEDS:
+        return !world_generation_base_is_rocky(base_tile_id) &&
+               !world_generation_base_is_sandy(base_tile_id);
+    case TILE_TREEPINE:
+        return !world_generation_base_is_sandy(base_tile_id);
+    case TILE_TREEPALM:
+        return world_generation_base_is_sandy(base_tile_id);
+    case TILE_TREEDEAD:
+        return base_tile_id != TILE_FORESTFLOOR;
+    case TILE_VINES:
+    case TILE_VINEPATCH:
+    case TILE_MUSHROOMPATCH:
+        return world_generation_base_is_wet(base_tile_id);
+    case TILE_CACTUS:
+    case TILE_DESERT_SHRUB:
+        return world_generation_base_is_sandy(base_tile_id) || base_tile_id == TILE_GRAVEL;
+    case TILE_ROCKCLUSTER:
+    case TILE_BOULDER:
+    case TILE_LARGEROCK:
+    case TILE_CAVEENTRANCE:
+        return world_generation_base_is_rocky(base_tile_id);
+    default:
+        return false;
+    }
+}
+
+static float world_generation_feature_density(BiomeType biome_type)
+{
+    switch (biome_type)
+    {
+    case BIOME_FOREST:
+        return 0.24f;
+    case BIOME_SWAMP:
+        return 0.20f;
+    case BIOME_MOUNTAINS:
+        return 0.18f;
+    case BIOME_HILLS:
+        return 0.16f;
+    case BIOME_DESERT:
+        return 0.12f;
+    case BIOME_PLAINS:
+    case BIOME_DRY_PLAINS_STEPPE:
+    case BIOME_TUNDRA:
+    case BIOME_SNOWY_MOUNTAINS:
+    case BIOME_COAST:
+        return 0.10f;
+    case BIOME_OCEAN:
+    case BIOME_LAKE:
+    case BIOME_RIVER:
+    case BIOME_TYPE_COUNT:
+    default:
+        return 0.0f;
+    }
+}
+
+static TileId world_generation_choose_feature_tile(BiomeType biome_type,
+                                                   TileId base_tile_id,
+                                                   int x,
+                                                   int y,
+                                                   unsigned int seed,
+                                                   float temperature_c,
+                                                   float moisture,
+                                                   float elevation)
+{
+    if (!world_generation_tile_can_host_feature(base_tile_id))
+    {
+        return TILE_ID_COUNT;
+    }
+
+    const TileId *feature_tiles = NULL;
+    size_t feature_tile_count = 0;
+    static const TileId forest_features[] = {
+        TILE_TREEOAK, TILE_TREEPINE, TILE_TREEBIRCH, TILE_TREESAPLING, TILE_BUSH, TILE_BERRYBUSH,
+        TILE_MUSHROOMPATCH};
+    static const TileId plains_features[] = {
+        TILE_TREESAPLING, TILE_BUSH, TILE_BERRYBUSH, TILE_FLOWERPATCH};
+    static const TileId swamp_features[] = {
+        TILE_TREEDEAD, TILE_VINES, TILE_VINEPATCH, TILE_MUSHROOMPATCH, TILE_BUSH};
+    static const TileId desert_features[] = {TILE_CACTUS, TILE_DESERT_SHRUB, TILE_TREEDEAD};
+    static const TileId dry_steppe_features[] = {TILE_DESERT_SHRUB, TILE_TALLWEEDS, TILE_BUSH};
+    static const TileId hills_features[] = {TILE_TREEOAK, TILE_BUSH, TILE_ROCKCLUSTER, TILE_BOULDER};
+    static const TileId mountain_features[] = {
+        TILE_ROCKCLUSTER, TILE_BOULDER, TILE_LARGEROCK, TILE_CAVEENTRANCE};
+    static const TileId tundra_features[] = {TILE_TREEDEAD, TILE_ROCKCLUSTER, TILE_BOULDER};
+    static const TileId snowy_mountain_features[] = {TILE_BOULDER, TILE_LARGEROCK, TILE_ROCKCLUSTER};
+    static const TileId coast_features[] = {TILE_TREEPALM, TILE_BUSH, TILE_ROCKCLUSTER};
+
+    switch (biome_type)
+    {
+    case BIOME_FOREST:
+        feature_tiles = forest_features;
+        feature_tile_count = sizeof(forest_features) / sizeof(forest_features[0]);
+        break;
+    case BIOME_PLAINS:
+        feature_tiles = plains_features;
+        feature_tile_count = sizeof(plains_features) / sizeof(plains_features[0]);
+        break;
+    case BIOME_SWAMP:
+        feature_tiles = swamp_features;
+        feature_tile_count = sizeof(swamp_features) / sizeof(swamp_features[0]);
+        break;
+    case BIOME_DESERT:
+        feature_tiles = desert_features;
+        feature_tile_count = sizeof(desert_features) / sizeof(desert_features[0]);
+        break;
+    case BIOME_DRY_PLAINS_STEPPE:
+        feature_tiles = dry_steppe_features;
+        feature_tile_count = sizeof(dry_steppe_features) / sizeof(dry_steppe_features[0]);
+        break;
+    case BIOME_HILLS:
+        feature_tiles = hills_features;
+        feature_tile_count = sizeof(hills_features) / sizeof(hills_features[0]);
+        break;
+    case BIOME_MOUNTAINS:
+        feature_tiles = mountain_features;
+        feature_tile_count = sizeof(mountain_features) / sizeof(mountain_features[0]);
+        break;
+    case BIOME_TUNDRA:
+        feature_tiles = tundra_features;
+        feature_tile_count = sizeof(tundra_features) / sizeof(tundra_features[0]);
+        break;
+    case BIOME_SNOWY_MOUNTAINS:
+        feature_tiles = snowy_mountain_features;
+        feature_tile_count = sizeof(snowy_mountain_features) / sizeof(snowy_mountain_features[0]);
+        break;
+    case BIOME_COAST:
+        feature_tiles = coast_features;
+        feature_tile_count = sizeof(coast_features) / sizeof(coast_features[0]);
+        break;
+    case BIOME_OCEAN:
+    case BIOME_LAKE:
+    case BIOME_RIVER:
+    case BIOME_TYPE_COUNT:
+    default:
+        return TILE_ID_COUNT;
+    }
+
+    if (feature_tiles == NULL || feature_tile_count == 0)
+    {
+        return TILE_ID_COUNT;
+    }
+
+    float spawn_chance = world_generation_feature_density(biome_type);
+    if (world_generation_base_is_wet(base_tile_id))
+    {
+        spawn_chance += 0.04f;
+    }
+    if (elevation > 0.70f && world_generation_base_is_rocky(base_tile_id))
+    {
+        spawn_chance += 0.05f;
+    }
+    if (moisture < 0.25f && world_generation_base_is_sandy(base_tile_id))
+    {
+        spawn_chance += 0.03f;
+    }
+    if (spawn_chance > 0.42f)
+    {
+        spawn_chance = 0.42f;
+    }
+
+    const float roll = world_generation_hash_to_unit_float(x, y, seed + 1907U);
+    if (roll > spawn_chance)
+    {
+        return TILE_ID_COUNT;
+    }
+
+    const unsigned int hash = world_generation_hash_u32(seed ^ ((unsigned int)x * 2671U) ^
+                                                        ((unsigned int)y * 1777U));
+    for (size_t i = 0; i < feature_tile_count; i++)
+    {
+        const TileId candidate = feature_tiles[(hash + (unsigned int)i) % feature_tile_count];
+        if (!world_generation_feature_allowed_in_biome(biome_type, candidate))
+        {
+            continue;
+        }
+        if (!world_generation_feature_is_valid_for_climate(candidate, temperature_c))
+        {
+            continue;
+        }
+        if (!world_generation_feature_allowed_on_base(candidate, base_tile_id))
+        {
+            continue;
+        }
+        if (candidate == TILE_CACTUS &&
+            !(temperature_c > 16.0f && moisture < 0.30f && world_generation_base_is_sandy(base_tile_id)))
+        {
+            continue;
+        }
+        if (candidate == TILE_TREEPALM &&
+            !(temperature_c > 18.0f && world_generation_base_is_sandy(base_tile_id)))
+        {
+            continue;
+        }
+        if (candidate == TILE_MUSHROOMPATCH && moisture < 0.55f)
+        {
+            continue;
+        }
+        if (candidate == TILE_CAVEENTRANCE &&
+            !(elevation > 0.78f && world_generation_base_is_rocky(base_tile_id)))
+        {
+            continue;
+        }
+        if (candidate == TILE_TREEPINE && elevation < 0.45f)
+        {
+            continue;
+        }
+
+        {
+            return candidate;
+        }
+    }
+
+    return TILE_ID_COUNT;
+}
+
 static TileId world_generation_choose_tile_from_biome(const BiomeDefinition *biome,
                                                        int x,
                                                        int y,
@@ -322,10 +653,12 @@ bool world_generate_procedural(World *world, unsigned int seed)
                 biome_type, elevation, moisture, temperature_c);
             const BiomeDefinition *biome = biome_get_definition(biome_type);
 
-            const bool is_water_biome = biome_type == BIOME_OCEAN || biome_type == BIOME_LAKE ||
-                                        biome_type == BIOME_RIVER || biome_type == BIOME_COAST;
-            const TileId tile_id = world_generation_choose_tile_from_biome(
+            const bool is_water_biome = world_generation_is_water_biome(biome_type);
+            const TileId base_tile_id = world_generation_choose_tile_from_biome(
                 biome, x, y, seed + 131U, !is_water_biome, temperature_c);
+            const TileId feature_tile_id = world_generation_choose_feature_tile(
+                biome_type, base_tile_id, x, y, seed + 719U, temperature_c, moisture, elevation);
+            const TileId tile_id = feature_tile_id != TILE_ID_COUNT ? feature_tile_id : base_tile_id;
 
             const int index = world_generation_index_from_xy(world, x, y);
             world->tiles[index] = tile_id;

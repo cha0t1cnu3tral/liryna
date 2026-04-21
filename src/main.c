@@ -39,6 +39,11 @@ static void game_announce(const char *text, bool interrupt)
 
 static bool game_create_new_world(Game *game)
 {
+    enum
+    {
+        WORLD_SIZE_TILES = 200,
+    };
+
     if (game == NULL)
     {
         return false;
@@ -50,7 +55,7 @@ static bool game_create_new_world(Game *game)
         game->world_loaded = false;
     }
 
-    if (!world_init(&game->world, 40, 22, 32))
+    if (!world_init(&game->world, WORLD_SIZE_TILES, WORLD_SIZE_TILES, 32))
     {
         fprintf(stderr, "game: world initialization failed\n");
         game_announce("New world generation failed.", true);

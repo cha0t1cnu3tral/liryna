@@ -144,6 +144,9 @@ typedef struct TileDefinition
     bool requires_foundation;
     bool is_liquid;
     uint8_t movement_cost_land;
+    const char *primary_resource;
+    uint16_t resource_yield;
+    bool renewable;
 } TileDefinition;
 
 size_t tiles_count(void);
