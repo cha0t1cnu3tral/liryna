@@ -1,6 +1,62 @@
 #include "world.h"
 
 #include <math.h>
+#include <stdlib.h>
+
+static int world_index_from_xy(const World *world, int x, int y)
+{
+    return (y * world->width) + x;
+}
+
+static bool world_can_stand_on(const World *world, float x, float y)
+{
+    if (world == NULL || world->tiles == NULL || world->tile_size <= 0)
+    {
+        return false;
+    }
+
+    const int tile_x = (int)(x / world->tile_size);
+    const int tile_y = (int)(y / world->tile_size);
+
+    if (tile_x < 0 || tile_y < 0 || tile_x >= world->width || tile_y >= world->height)
+    {
+        return false;
+    }
+
+    const int index = world_index_from_xy(world, tile_x, tile_y);
+    const TileDefinition *tile = tiles_get_definition(world->tiles[index]);
+
+    return tile != NULL && tile->walkable && !tile->blocks_land_movement;
+}
+
+static SDL_Color world_tile_color(const TileDefinition *tile)
+{
+    if (tile == NULL)
+    {
+        return (SDL_Color){70, 70, 70, 255};
+    }
+
+    if (tile->is_liquid)
+    {
+        return (SDL_Color){40, 95, 185, 255};
+    }
+
+    switch (tile->layer)
+    {
+    case TILE_LAYER_GROUND:
+        return (SDL_Color){70, 120, 70, 255};
+    case TILE_LAYER_FLOOR:
+        return (SDL_Color){120, 105, 80, 255};
+    case TILE_LAYER_OBJECT:
+        return (SDL_Color){145, 100, 60, 255};
+    case TILE_LAYER_STRUCTURE:
+        return (SDL_Color){110, 110, 120, 255};
+    case TILE_LAYER_UNKNOWN:
+    case TILE_LAYER_COUNT:
+    default:
+        return (SDL_Color){95, 95, 95, 255};
+    }
+}
 
 bool world_init(World *world, int width, int height, int tile_size)
 {
@@ -12,10 +68,36 @@ bool world_init(World *world, int width, int height, int tile_size)
     world->width = width;
     world->height = height;
     world->tile_size = tile_size;
+    world->tiles = NULL;
 
     world->player_x = (width * tile_size) / 2.0f;
     world->player_y = (height * tile_size) / 2.0f;
     world->player_speed = 200.0f;
+
+    const int tile_count = width * height;
+    world->tiles = (TileId *)malloc((size_t)tile_count * sizeof(TileId));
+    if (world->tiles == NULL)
+    {
+        world_shutdown(world);
+        return false;
+    }
+
+    for (int i = 0; i < tile_count; i++)
+    {
+        world->tiles[i] = TILE_GRASS;
+    }
+
+    for (int x = 0; x < width; x++)
+    {
+        world->tiles[world_index_from_xy(world, x, 0)] = TILE_SHALLOWWATER;
+        world->tiles[world_index_from_xy(world, x, height - 1)] = TILE_SHALLOWWATER;
+    }
+
+    for (int y = 0; y < height; y++)
+    {
+        world->tiles[world_index_from_xy(world, 0, y)] = TILE_SHALLOWWATER;
+        world->tiles[world_index_from_xy(world, width - 1, y)] = TILE_SHALLOWWATER;
+    }
 
     return true;
 }
@@ -37,8 +119,18 @@ void world_update(World *world, float delta_time, float move_x, float move_y)
         }
     }
 
-    world->player_x += move_x * world->player_speed * delta_time;
-    world->player_y += move_y * world->player_speed * delta_time;
+    const float next_x = world->player_x + (move_x * world->player_speed * delta_time);
+    const float next_y = world->player_y + (move_y * world->player_speed * delta_time);
+
+    if (world_can_stand_on(world, next_x, world->player_y))
+    {
+        world->player_x = next_x;
+    }
+
+    if (world_can_stand_on(world, world->player_x, next_y))
+    {
+        world->player_y = next_y;
+    }
 
     float max_x = (world->width * world->tile_size) - world->tile_size;
     float max_y = (world->height * world->tile_size) - world->tile_size;
@@ -96,6 +188,15 @@ void world_render(World *world, SDL_Renderer *renderer)
             tile_rect.w = (float)world->tile_size;
             tile_rect.h = (float)world->tile_size;
 
+            const int index = world_index_from_xy(world, x, y);
+            const TileDefinition *tile = tiles_get_definition(world->tiles[index]);
+            const SDL_Color fill_color = world_tile_color(tile);
+
+            SDL_SetRenderDrawColor(renderer, fill_color.r, fill_color.g, fill_color.b,
+                                   fill_color.a);
+            SDL_RenderFillRect(renderer, &tile_rect);
+
+            SDL_SetRenderDrawColor(renderer, 55, 55, 55, 255);
             SDL_RenderRect(renderer, &tile_rect);
         }
     }
@@ -116,6 +217,9 @@ void world_shutdown(World *world)
     {
         return;
     }
+
+    free(world->tiles);
+    world->tiles = NULL;
 
     world->width = 0;
     world->height = 0;

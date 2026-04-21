@@ -3,12 +3,14 @@
 
 #include <stdbool.h>
 #include <SDL3/SDL.h>
+#include "tiles.h"
 
 typedef struct World
 {
     int width;
     int height;
     int tile_size;
+    TileId *tiles;
 
     float player_x;
     float player_y;

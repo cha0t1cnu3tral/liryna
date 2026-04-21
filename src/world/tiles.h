@@ -1,0 +1,154 @@
+#ifndef TILES_H
+#define TILES_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+typedef enum TileLayer
+{
+    TILE_LAYER_UNKNOWN = 0,
+    TILE_LAYER_GROUND,
+    TILE_LAYER_FLOOR,
+    TILE_LAYER_OBJECT,
+    TILE_LAYER_STRUCTURE,
+    TILE_LAYER_COUNT
+} TileLayer;
+
+typedef enum TileId
+{
+    TILE_GRASS,
+    TILE_DRYGRASS,
+    TILE_TALLGRASS,
+    TILE_DIRT,
+    TILE_PACKEDDIRT,
+    TILE_MUD,
+    TILE_SAND,
+    TILE_DESERTSAND,
+    TILE_GRAVEL,
+    TILE_CLAY,
+    TILE_MOSS,
+    TILE_FORESTFLOOR,
+    TILE_SNOW,
+    TILE_ICE,
+    TILE_FROZENGROUND,
+    TILE_PERMAFROST,
+    TILE_BASALT,
+    TILE_GRANITE,
+    TILE_LIMESTONE,
+    TILE_WETSOIL,
+    TILE_FLOODEDGROUND,
+    TILE_SHALLOWWATER,
+    TILE_DEEPWATER,
+    TILE_OCEANWATER,
+    TILE_RIVERWATER,
+    TILE_STREAMWATER,
+    TILE_SWAMPWATER,
+    TILE_MARSHWATER,
+    TILE_PONDWATER,
+    TILE_LAKEWATER,
+    TILE_WATERFOAM,
+    TILE_WATERCURRENT,
+    TILE_WATERFALL,
+    TILE_WATEREDGE,
+    TILE_TOXIC_WATER,
+    TILE_OILSPILL,
+    TILE_LAVA,
+    TILE_MAGMA,
+    TILE_TREEOAK,
+    TILE_TREEPINE,
+    TILE_TREEBIRCH,
+    TILE_TREEPALM,
+    TILE_TREEDEAD,
+    TILE_TREEBURNT,
+    TILE_TREESAPLING,
+    TILE_BUSH,
+    TILE_BERRYBUSH,
+    TILE_FLOWERPATCH,
+    TILE_TALLWEEDS,
+    TILE_VINEPATCH,
+    TILE_VINES,
+    TILE_MUSHROOMPATCH,
+    TILE_GIANTMUSHROOM,
+    TILE_CACTUS,
+    TILE_DESERT_SHRUB,
+    TILE_BOULDER,
+    TILE_ROCKCLUSTER,
+    TILE_LARGEROCK,
+    TILE_CAVEENTRANCE,
+    TILE_WOODFOUNDATION,
+    TILE_STONEFOUNDATION,
+    TILE_CONCRETEFOUNDATION,
+    TILE_BRICKFOUNDATION,
+    TILE_STEELFOUNDATION,
+    TILE_REINFORCEDFOUNDATION,
+    TILE_PIER,
+    TILE_CARPET,
+    TILE_LOGWALL,
+    TILE_PLANKWALL,
+    TILE_STONEWALL,
+    TILE_BRICKWALL,
+    TILE_CONCRETEWALL,
+    TILE_REINFORCEDWALL,
+    TILE_STEELWALL,
+    TILE_GLASSWALL,
+    TILE_METALWALL,
+    TILE_FENCEWOOD,
+    TILE_FENCEMETAL,
+    TILE_FENCESTONE,
+    TILE_FENCECHAIN,
+    TILE_FENCEBARBED,
+    TILE_BARRICADEWOOD,
+    TILE_BARRICADESANDBAG,
+    TILE_RUINEDWALL,
+    TILE_CRACKEDWALL,
+    TILE_TABLE,
+    TILE_TABLEROUND,
+    TILE_TABLELONG,
+    TILE_CHAIRWOOD,
+    TILE_CHAIRMETAL,
+    TILE_SOFA,
+    TILE_BED,
+    TILE_BUNKBED,
+    TILE_CABINET,
+    TILE_SHELF,
+    TILE_BOOKSHELF,
+    TILE_CHEST,
+    TILE_LOCKER,
+    TILE_DESK,
+    TILE_OFFICEDESK,
+    TILE_LAMP,
+    TILE_CEILINGLIGHT,
+    TILE_FLOORLAMP,
+    TILE_STOVE,
+    TILE_OVEN,
+    TILE_SINK,
+    TILE_BATHTUB,
+    TILE_TOILET,
+    TILE_SHOWER,
+    TILE_FRIDGE,
+    TILE_WASHINGMACHINE,
+    TILE_DRYER,
+    TILE_ID_COUNT
+} TileId;
+
+typedef struct TileDefinition
+{
+    TileId id;
+    const char *name;
+    bool walkable;
+    TileLayer layer;
+    bool blocks_land_movement;
+    bool blocks_swimming;
+    bool buildable_on;
+    bool requires_foundation;
+    bool is_liquid;
+    uint8_t movement_cost_land;
+} TileDefinition;
+
+size_t tiles_count(void);
+const TileDefinition *tiles_get_definition(TileId id);
+TileId tiles_find_by_name(const char *name);
+const char *tiles_layer_name(TileLayer layer);
+
+#endif
