@@ -29,7 +29,14 @@ static bool world_can_stand_on(const World *world, float x, float y)
     const int index = world_index_from_xy(world, tile_x, tile_y);
     const TileDefinition *tile = tiles_get_definition(world->tiles[index]);
 
-    return tile != NULL && tile->walkable && !tile->blocks_land_movement;
+    if (tile == NULL)
+    {
+        return false;
+    }
+
+    const bool can_walk = tile->walkable && !tile->blocks_land_movement;
+    const bool can_swim = tile->is_liquid && !tile->blocks_swimming;
+    return can_walk || can_swim;
 }
 
 static SDL_Color world_tile_color(const TileDefinition *tile)
