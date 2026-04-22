@@ -23,6 +23,9 @@ typedef enum SettingType
 bool settings_id_is_valid(SettingId id);
 SettingType settings_get_type(SettingId id);
 
+bool settings_load(void);
+bool settings_save(void);
+
 int settings_get_int(SettingId id);
 void settings_set_int(SettingId id, int value);
 int settings_get_int_min(SettingId id);
