@@ -1,5 +1,7 @@
 #include "music_player.h"
 
+#include "settings.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -15,6 +17,7 @@ static const char *k_music_relative_path = "assets/music/mm1 music opening.mp3";
 #ifdef _WIN32
 static const char *k_music_alias = "liryna_main_menu_music";
 static bool g_music_started = false;
+static int g_music_volume = -1;
 
 static bool file_exists(const char *path)
 {
@@ -106,6 +109,28 @@ static bool send_mci_command(const char *command)
     return false;
 }
 
+void music_player_update_volume(void)
+{
+    if (!g_music_started)
+    {
+        return;
+    }
+
+    const int volume = settings_effective_music_mci_volume(500);
+    if (volume == g_music_volume)
+    {
+        return;
+    }
+
+    char command[128];
+    SDL_snprintf(command, sizeof(command), "setaudio %s volume to %d",
+                 k_music_alias, volume);
+    if (send_mci_command(command))
+    {
+        g_music_volume = volume;
+    }
+}
+
 bool music_player_start_main_menu_music(void)
 {
     if (g_music_started)
@@ -128,12 +153,15 @@ bool music_player_start_main_menu_music(void)
         return false;
     }
 
-    SDL_snprintf(command, sizeof(command), "setaudio %s volume to 500", k_music_alias);
+    g_music_volume = -1;
+    SDL_snprintf(command, sizeof(command), "setaudio %s volume to %d", k_music_alias,
+                 settings_effective_music_mci_volume(500));
     if (!send_mci_command(command))
     {
         send_mci_command("close liryna_main_menu_music");
         return false;
     }
+    g_music_volume = settings_effective_music_mci_volume(500);
 
     SDL_snprintf(command, sizeof(command), "play %s repeat", k_music_alias);
     if (!send_mci_command(command))
@@ -156,6 +184,7 @@ void music_player_shutdown(void)
     send_mci_command("stop liryna_main_menu_music");
     send_mci_command("close liryna_main_menu_music");
     g_music_started = false;
+    g_music_volume = -1;
 }
 
 #else
@@ -163,6 +192,10 @@ void music_player_shutdown(void)
 bool music_player_start_main_menu_music(void)
 {
     return false;
+}
+
+void music_player_update_volume(void)
+{
 }
 
 void music_player_shutdown(void)

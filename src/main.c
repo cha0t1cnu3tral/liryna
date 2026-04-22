@@ -480,6 +480,7 @@ static void game_update(Engine *engine, void *userdata)
               next_container_pressed, previous_container_pressed, enter_pressed,
               back_pressed, backspace_pressed, engine_text_input(engine), &action,
               game->speech_ready ? game_announce : NULL);
+    music_player_update_volume();
 
     if (action == UI_ACTION_EXIT)
     {

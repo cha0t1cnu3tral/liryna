@@ -1,5 +1,7 @@
 #include "water_biome_audio.h"
 
+#include "settings.h"
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -605,7 +607,8 @@ void water_biome_audio_update(const World *world, float delta_time)
                 world->player_speed > 0.001f ? SDL_clamp(movement_speed / world->player_speed, 0.0f, 1.7f)
                                              : 0.0f;
             const float gain = SDL_clamp(0.30f + (normalized_speed * 0.50f), 0.0f, 1.0f);
-            const int base_volume = (int)(gain * track->peak_volume);
+            int base_volume = (int)(gain * track->peak_volume);
+            base_volume = settings_effective_footsteps_mci_volume(base_volume);
             const int speed_permille = (int)(700.0f + (normalized_speed * 600.0f));
             set_track_speed(track, speed_permille);
             set_track_channel_volume(track, base_volume, base_volume);
@@ -639,7 +642,8 @@ void water_biome_audio_update(const World *world, float delta_time)
         const float left_gain = cosf(angle);
         const float right_gain = sinf(angle);
 
-        const int base_volume = (int)(base_gain * track->peak_volume);
+        const int base_volume = settings_effective_ambience_mci_volume(
+            (int)(base_gain * track->peak_volume));
         const int left_volume = (int)(left_gain * (float)base_volume);
         const int right_volume = (int)(right_gain * (float)base_volume);
         set_track_channel_volume(track, left_volume, right_volume);

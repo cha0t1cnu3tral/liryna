@@ -1,34 +1,43 @@
 #include "screen_registry.h"
 
-static bool k_speech_hints_enabled = true;
-static int k_speech_rate = 50;
-static char k_player_name[32] = "Player";
-static int k_difficulty_index = 1;
-
-static const char *const k_difficulty_options[] = {
-    "easy",
-    "normal",
-    "hard",
-};
-
-static const UiWidget k_settings_buttons[] = {
-    UI_TOGGLE("Speech hints", &k_speech_hints_enabled),
-    UI_SLIDER("Speech rate", &k_speech_rate, 0, 100, 5),
-    UI_EDIT_BOX("Player name", k_player_name, sizeof(k_player_name)),
-    UI_PICKER("Difficulty", k_difficulty_options, &k_difficulty_index),
-    UI_BUTTON("Back", UI_ACTION_BACK),
-};
-
-static const UiWidget k_settings_root =
-    UI_VERTICAL_CONTAINER("Settings", k_settings_buttons);
-
-static const UiScreenDefinition k_settings_screen = {
-    UI_SCREEN_SETTINGS,
-    "Settings",
-    &k_settings_root,
-};
+#include "settings.h"
 
 const UiScreenDefinition *ui_settings_screen(void)
 {
-    return &k_settings_screen;
+    static bool initialized = false;
+    static UiWidget volume_controls[4];
+    static UiWidget navigation_buttons[1];
+    static UiWidget containers[2];
+    static UiWidget root;
+    static UiScreenDefinition screen;
+
+    if (!initialized)
+    {
+        volume_controls[0] = (UiWidget)UI_SLIDER(
+            "Master volume", settings_get_int_ptr(SETTING_MASTER_VOLUME), 0, 100, 5);
+        volume_controls[1] = (UiWidget)UI_SLIDER(
+            "Music volume", settings_get_int_ptr(SETTING_MUSIC_VOLUME), 0, 100, 5);
+        volume_controls[2] = (UiWidget)UI_SLIDER(
+            "Ambience volume", settings_get_int_ptr(SETTING_AMBIENCE_VOLUME), 0, 100, 5);
+        volume_controls[3] = (UiWidget)UI_SLIDER(
+            "Footsteps volume", settings_get_int_ptr(SETTING_FOOTSTEPS_VOLUME), 0, 100, 5);
+
+        navigation_buttons[0] = (UiWidget)UI_BUTTON("Back", UI_ACTION_BACK);
+
+        containers[0] = (UiWidget)UI_VERTICAL_CONTAINER("Volume controls", volume_controls);
+        containers[0].child_count = UI_ARRAY_COUNT(volume_controls);
+        containers[1] = (UiWidget)UI_VERTICAL_CONTAINER("Navigation", navigation_buttons);
+        containers[1].child_count = UI_ARRAY_COUNT(navigation_buttons);
+
+        root = (UiWidget)UI_VERTICAL_CONTAINER("Settings", containers);
+        root.child_count = UI_ARRAY_COUNT(containers);
+
+        screen.id = UI_SCREEN_SETTINGS;
+        screen.title = "Settings";
+        screen.root = &root;
+
+        initialized = true;
+    }
+
+    return &screen;
 }

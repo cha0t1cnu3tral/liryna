@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 bool music_player_start_main_menu_music(void);
+void music_player_update_volume(void);
 void music_player_shutdown(void);
 
 #endif
