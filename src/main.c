@@ -5,6 +5,7 @@
 
 #include "engine.h"
 #include "music_player.h"
+#include "settings.h"
 #include "speech.h"
 #include "water_biome_audio.h"
 #include "ui/ui.h"
@@ -398,6 +399,11 @@ static void game_init(Engine *engine, void *userdata)
     game->tracker_object_index = 0;
 
     game->speech_ready = speech_init();
+    if (!settings_load())
+    {
+        fprintf(stderr, "game: settings load failed\n");
+    }
+
     if (!music_player_start_main_menu_music())
     {
         fprintf(stderr, "game: main menu music failed to start\n");
@@ -716,6 +722,7 @@ static void game_shutdown(Engine *engine, void *userdata)
 
     music_player_shutdown();
     water_biome_audio_shutdown();
+    settings_save();
     speech_shutdown();
 }
 
