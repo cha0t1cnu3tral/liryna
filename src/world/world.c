@@ -11,24 +11,26 @@ static int world_index_from_xy(const World *world, int x, int y)
     return (y * world->width) + x;
 }
 
-static bool world_can_stand_on(const World *world, float x, float y)
+static const TileDefinition *world_get_tile_definition_at(const World *world, float x, float y)
 {
     if (world == NULL || world->tiles == NULL || world->tile_size <= 0)
     {
-        return false;
+        return NULL;
     }
 
-    const int tile_x = (int)(x / world->tile_size);
-    const int tile_y = (int)(y / world->tile_size);
-
+    const int tile_x = (int)(x / (float)world->tile_size);
+    const int tile_y = (int)(y / (float)world->tile_size);
     if (tile_x < 0 || tile_y < 0 || tile_x >= world->width || tile_y >= world->height)
     {
-        return false;
+        return NULL;
     }
 
-    const int index = world_index_from_xy(world, tile_x, tile_y);
-    const TileDefinition *tile = tiles_get_definition(world->tiles[index]);
+    return tiles_get_definition(world->tiles[world_index_from_xy(world, tile_x, tile_y)]);
+}
 
+static bool world_can_stand_on(const World *world, float x, float y)
+{
+    const TileDefinition *tile = world_get_tile_definition_at(world, x, y);
     if (tile == NULL)
     {
         return false;
@@ -85,6 +87,12 @@ bool world_init(World *world, int width, int height, int tile_size)
     world->player_x = (width * tile_size) / 2.0f;
     world->player_y = (height * tile_size) / 2.0f;
     world->player_speed = 200.0f;
+    world->player_swim_speed = 130.0f;
+    world->player_jump_duration = 0.2f;
+    world->player_jump_time_remaining = 0.0f;
+    world->player_jump_speed_multiplier = 1.75f;
+    world->player_is_swimming = false;
+    world->player_is_jumping = false;
 
     const int tile_count = width * height;
     world->tiles = (TileId *)malloc((size_t)tile_count * sizeof(TileId));
@@ -124,11 +132,33 @@ bool world_init(World *world, int width, int height, int tile_size)
     return true;
 }
 
-void world_update(World *world, float delta_time, float move_x, float move_y)
+void world_update(World *world, float delta_time, float move_x, float move_y, bool jump_pressed)
 {
     if (world == NULL)
     {
         return;
+    }
+
+    const TileDefinition *current_tile =
+        world_get_tile_definition_at(world, world->player_x, world->player_y);
+    const bool can_swim_here =
+        current_tile != NULL && current_tile->is_liquid && !current_tile->blocks_swimming;
+    world->player_is_swimming = can_swim_here;
+
+    if (jump_pressed && !world->player_is_swimming)
+    {
+        world->player_jump_time_remaining = world->player_jump_duration;
+    }
+
+    if (world->player_jump_time_remaining > 0.0f)
+    {
+        world->player_jump_time_remaining -= delta_time;
+        world->player_is_jumping = true;
+    }
+    else
+    {
+        world->player_jump_time_remaining = 0.0f;
+        world->player_is_jumping = false;
     }
 
     if (move_x != 0.0f && move_y != 0.0f)
@@ -141,8 +171,14 @@ void world_update(World *world, float delta_time, float move_x, float move_y)
         }
     }
 
-    const float next_x = world->player_x + (move_x * world->player_speed * delta_time);
-    const float next_y = world->player_y + (move_y * world->player_speed * delta_time);
+    float active_speed = world->player_is_swimming ? world->player_swim_speed : world->player_speed;
+    if (world->player_is_jumping)
+    {
+        active_speed *= world->player_jump_speed_multiplier;
+    }
+
+    const float next_x = world->player_x + (move_x * active_speed * delta_time);
+    const float next_y = world->player_y + (move_y * active_speed * delta_time);
 
     if (world_can_stand_on(world, next_x, world->player_y))
     {
@@ -186,6 +222,11 @@ void world_update(World *world, float delta_time, float move_x, float move_y)
     {
         world->player_y = max_y;
     }
+
+    const TileDefinition *updated_tile =
+        world_get_tile_definition_at(world, world->player_x, world->player_y);
+    world->player_is_swimming =
+        updated_tile != NULL && updated_tile->is_liquid && !updated_tile->blocks_swimming;
 }
 
 void world_render(World *world, SDL_Renderer *renderer)
@@ -300,4 +341,10 @@ void world_shutdown(World *world)
     world->player_x = 0.0f;
     world->player_y = 0.0f;
     world->player_speed = 0.0f;
+    world->player_swim_speed = 0.0f;
+    world->player_jump_duration = 0.0f;
+    world->player_jump_time_remaining = 0.0f;
+    world->player_jump_speed_multiplier = 0.0f;
+    world->player_is_swimming = false;
+    world->player_is_jumping = false;
 }

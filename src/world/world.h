@@ -18,10 +18,16 @@ typedef struct World
     float player_x;
     float player_y;
     float player_speed;
+    float player_swim_speed;
+    float player_jump_duration;
+    float player_jump_time_remaining;
+    float player_jump_speed_multiplier;
+    bool player_is_swimming;
+    bool player_is_jumping;
 } World;
 
 bool world_init(World *world, int width, int height, int tile_size);
-void world_update(World *world, float delta_time, float move_x, float move_y);
+void world_update(World *world, float delta_time, float move_x, float move_y, bool jump_pressed);
 void world_render(World *world, SDL_Renderer *renderer);
 bool world_get_player_environment(const World *world,
                                   int *tile_x,

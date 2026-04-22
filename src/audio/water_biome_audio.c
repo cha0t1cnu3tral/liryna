@@ -18,6 +18,7 @@ typedef struct BiomeAudioTrack
     float peak_volume;
     bool apply_loop_smoothing;
     bool is_footstep_track;
+    bool is_swim_track;
     bool footstep_is_cold;
     int left_volume;
     int right_volume;
@@ -48,6 +49,7 @@ static BiomeAudioTrack g_tracks[] = {
         .peak_volume = 950.0f,
         .apply_loop_smoothing = false,
         .is_footstep_track = false,
+        .is_swim_track = false,
         .footstep_is_cold = false,
         .left_volume = -1,
         .right_volume = -1,
@@ -64,6 +66,7 @@ static BiomeAudioTrack g_tracks[] = {
         .peak_volume = 820.0f,
         .apply_loop_smoothing = true,
         .is_footstep_track = false,
+        .is_swim_track = false,
         .footstep_is_cold = false,
         .left_volume = -1,
         .right_volume = -1,
@@ -80,6 +83,7 @@ static BiomeAudioTrack g_tracks[] = {
         .peak_volume = 900.0f,
         .apply_loop_smoothing = false,
         .is_footstep_track = true,
+        .is_swim_track = false,
         .footstep_is_cold = true,
         .left_volume = -1,
         .right_volume = -1,
@@ -96,6 +100,24 @@ static BiomeAudioTrack g_tracks[] = {
         .peak_volume = 880.0f,
         .apply_loop_smoothing = false,
         .is_footstep_track = true,
+        .is_swim_track = false,
+        .footstep_is_cold = false,
+        .left_volume = -1,
+        .right_volume = -1,
+        .speed_permille = -1,
+        .length_ms = 0U,
+        .drift_current = 1.0f,
+        .drift_target = 1.0f,
+        .drift_timer = 0.0f,
+    },
+    {
+        .relative_path = "assets/sfx/swimmingsound.mp3",
+        .alias = "liryna_swimming",
+        .matches_biome = NULL,
+        .peak_volume = 860.0f,
+        .apply_loop_smoothing = false,
+        .is_footstep_track = false,
+        .is_swim_track = true,
         .footstep_is_cold = false,
         .left_volume = -1,
         .right_volume = -1,
@@ -563,15 +585,20 @@ void water_biome_audio_update(const World *world, float delta_time)
                                   player_tile_x < world->width && player_tile_y < world->height;
     bool player_on_ground_layer = false;
     bool player_on_cold_ground = false;
+    bool player_swimming = false;
     if (player_in_bounds)
     {
         const int player_index = (player_tile_y * world->width) + player_tile_x;
         const TileId player_tile_id = world->tiles[player_index];
         const TileDefinition *player_tile = tiles_get_definition(player_tile_id);
-        if (player_tile != NULL && player_tile->walkable && player_tile->layer == TILE_LAYER_GROUND)
+        if (player_tile != NULL)
         {
-            player_on_ground_layer = true;
-            player_on_cold_ground = is_cold_ground_tile(player_tile_id);
+            if (player_tile->walkable && player_tile->layer == TILE_LAYER_GROUND)
+            {
+                player_on_ground_layer = true;
+                player_on_cold_ground = is_cold_ground_tile(player_tile_id);
+            }
+            player_swimming = player_tile->is_liquid && !player_tile->blocks_swimming;
         }
     }
     float movement_speed = 0.0f;
@@ -590,6 +617,27 @@ void water_biome_audio_update(const World *world, float delta_time)
     for (size_t i = 0; i < k_track_count; i++)
     {
         BiomeAudioTrack *track = &g_tracks[i];
+        if (track->is_swim_track)
+        {
+            if (!player_swimming || movement_speed < 2.0f)
+            {
+                set_track_channel_volume(track, 0, 0);
+                set_track_speed(track, 1000);
+                continue;
+            }
+
+            const float swim_speed = world->player_swim_speed > 0.001f ? world->player_swim_speed
+                                                                        : world->player_speed;
+            const float normalized_speed =
+                swim_speed > 0.001f ? SDL_clamp(movement_speed / swim_speed, 0.0f, 1.6f) : 0.0f;
+            const float gain = SDL_clamp(0.28f + (normalized_speed * 0.52f), 0.0f, 1.0f);
+            const int base_volume = (int)(gain * track->peak_volume);
+            const int speed_permille = (int)(760.0f + (normalized_speed * 520.0f));
+            set_track_speed(track, speed_permille);
+            set_track_channel_volume(track, base_volume, base_volume);
+            continue;
+        }
+
         if (track->is_footstep_track)
         {
             const bool track_matches_current_surface =

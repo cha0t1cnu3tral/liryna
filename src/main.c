@@ -31,10 +31,14 @@ typedef struct Game
     bool prev_page_down;
     bool prev_home;
     bool prev_tab;
+    bool prev_space;
 
     bool has_prev_tile;
     int prev_tile_x;
     int prev_tile_y;
+    bool has_prev_blocked_tile;
+    int prev_blocked_tile_x;
+    int prev_blocked_tile_y;
 
     int tracker_category_index;
     int tracker_object_index;
@@ -203,6 +207,98 @@ static void game_announce(const char *text, bool interrupt)
     }
 }
 
+static const TileDefinition *game_get_tile_at(const World *world, int tile_x, int tile_y)
+{
+    if (world == NULL || world->tiles == NULL || world->width <= 0 || world->height <= 0)
+    {
+        return NULL;
+    }
+
+    if (tile_x < 0 || tile_y < 0 || tile_x >= world->width || tile_y >= world->height)
+    {
+        return NULL;
+    }
+
+    const int index = (tile_y * world->width) + tile_x;
+    return tiles_get_definition(world->tiles[index]);
+}
+
+static bool game_is_feature_blocking_tile(const TileDefinition *tile)
+{
+    return tile != NULL &&
+           tile->blocks_land_movement &&
+           (tile->layer == TILE_LAYER_OBJECT || tile->layer == TILE_LAYER_STRUCTURE);
+}
+
+static void game_announce_blocked_feature_ahead(Game *game, int move_dir_x, int move_dir_y)
+{
+    if (game == NULL || !game->world_loaded || game->world.tile_size <= 0)
+    {
+        return;
+    }
+
+    if (move_dir_x == 0 && move_dir_y == 0)
+    {
+        game->has_prev_blocked_tile = false;
+        return;
+    }
+
+    const int tile_x = (int)(game->world.player_x / (float)game->world.tile_size);
+    const int tile_y = (int)(game->world.player_y / (float)game->world.tile_size);
+
+    int candidates_x[3];
+    int candidates_y[3];
+    int candidate_count = 0;
+    if (move_dir_x != 0 && move_dir_y != 0)
+    {
+        candidates_x[candidate_count] = tile_x + move_dir_x;
+        candidates_y[candidate_count] = tile_y + move_dir_y;
+        candidate_count++;
+    }
+    if (move_dir_x != 0)
+    {
+        candidates_x[candidate_count] = tile_x + move_dir_x;
+        candidates_y[candidate_count] = tile_y;
+        candidate_count++;
+    }
+    if (move_dir_y != 0)
+    {
+        candidates_x[candidate_count] = tile_x;
+        candidates_y[candidate_count] = tile_y + move_dir_y;
+        candidate_count++;
+    }
+
+    for (int i = 0; i < candidate_count; i++)
+    {
+        const int next_x = candidates_x[i];
+        const int next_y = candidates_y[i];
+        const TileDefinition *tile = game_get_tile_at(&game->world, next_x, next_y);
+        if (!game_is_feature_blocking_tile(tile))
+        {
+            continue;
+        }
+
+        const bool already_announced =
+            game->has_prev_blocked_tile &&
+            game->prev_blocked_tile_x == next_x &&
+            game->prev_blocked_tile_y == next_y;
+        if (!already_announced)
+        {
+            char message[160];
+            snprintf(message, sizeof(message), "%s.",
+                     tile->name != NULL ? tile->name : "Obstacle");
+            game_announce(message, true);
+        }
+
+        game->has_prev_blocked_tile = true;
+        game->prev_blocked_tile_x = next_x;
+        game->prev_blocked_tile_y = next_y;
+        return;
+    }
+
+    game->has_prev_blocked_tile = false;
+}
+
 static bool game_find_object_in_category(const World *world,
                                          TrackerCategory category,
                                          int target_index,
@@ -367,6 +463,9 @@ static bool game_create_new_world(Game *game)
     game->has_prev_tile = false;
     game->tracker_category_index = 0;
     game->tracker_object_index = 0;
+    game->has_prev_blocked_tile = false;
+    game->prev_blocked_tile_x = -1;
+    game->prev_blocked_tile_y = -1;
     game_announce("New world ready.", false);
     return true;
 }
@@ -391,9 +490,13 @@ static void game_init(Engine *engine, void *userdata)
     game->prev_page_down = false;
     game->prev_home = false;
     game->prev_tab = false;
+    game->prev_space = false;
     game->has_prev_tile = false;
     game->prev_tile_x = -1;
     game->prev_tile_y = -1;
+    game->has_prev_blocked_tile = false;
+    game->prev_blocked_tile_x = -1;
+    game->prev_blocked_tile_y = -1;
     game->tracker_category_index = 0;
     game->tracker_object_index = 0;
 
@@ -436,6 +539,7 @@ static void game_update(Engine *engine, void *userdata)
     const bool page_down_now = engine_key_down(engine, SDL_SCANCODE_PAGEDOWN);
     const bool home_now = engine_key_down(engine, SDL_SCANCODE_HOME);
     const bool tab_now = engine_key_down(engine, SDL_SCANCODE_TAB);
+    const bool space_now = engine_key_down(engine, SDL_SCANCODE_SPACE);
     const bool shift_now = engine_key_down(engine, SDL_SCANCODE_LSHIFT) ||
                            engine_key_down(engine, SDL_SCANCODE_RSHIFT);
     const bool ctrl_now = engine_key_down(engine, SDL_SCANCODE_LCTRL) ||
@@ -457,6 +561,7 @@ static void game_update(Engine *engine, void *userdata)
     const bool page_down_pressed = page_down_now && !game->prev_page_down;
     const bool home_pressed = home_now && !game->prev_home;
     const bool tab_pressed = tab_now && !game->prev_tab;
+    const bool space_pressed = space_now && !game->prev_space;
     const bool next_container_pressed = tab_pressed && !shift_now;
     const bool previous_container_pressed = tab_pressed && shift_now;
 
@@ -474,6 +579,7 @@ static void game_update(Engine *engine, void *userdata)
     game->prev_page_down = page_down_now;
     game->prev_home = home_now;
     game->prev_tab = tab_now;
+    game->prev_space = space_now;
 
     UiAction action = UI_ACTION_NONE;
     ui_update(&game->ui, up_pressed, down_pressed, left_pressed, right_pressed,
@@ -502,10 +608,14 @@ static void game_update(Engine *engine, void *userdata)
         }
     }
 
-    if (ui_screen(&game->ui) != UI_SCREEN_WORLD || !game->world_loaded)
+    const bool in_world_screen = ui_screen(&game->ui) == UI_SCREEN_WORLD && game->world_loaded;
+    music_player_update(in_world_screen, engine_delta_time(engine));
+
+    if (!in_world_screen)
     {
         water_biome_audio_update(NULL, engine_delta_time(engine));
         game->has_prev_tile = false;
+        game->has_prev_blocked_tile = false;
         return;
     }
 
@@ -536,8 +646,31 @@ static void game_update(Engine *engine, void *userdata)
         move_x += 1.0f;
     }
 
-    world_update(&game->world, engine_delta_time(engine), move_x, move_y);
+    const float player_x_before = game->world.player_x;
+    const float player_y_before = game->world.player_y;
+    world_update(&game->world, engine_delta_time(engine), move_x, move_y, space_pressed);
     water_biome_audio_update(&game->world, engine_delta_time(engine));
+
+    if (move_x != 0.0f || move_y != 0.0f)
+    {
+        const bool blocked =
+            SDL_fabsf(game->world.player_x - player_x_before) < 0.001f &&
+            SDL_fabsf(game->world.player_y - player_y_before) < 0.001f;
+        if (blocked)
+        {
+            const int move_dir_x = move_x > 0.0f ? 1 : (move_x < 0.0f ? -1 : 0);
+            const int move_dir_y = move_y > 0.0f ? 1 : (move_y < 0.0f ? -1 : 0);
+            game_announce_blocked_feature_ahead(game, move_dir_x, move_dir_y);
+        }
+        else
+        {
+            game->has_prev_blocked_tile = false;
+        }
+    }
+    else
+    {
+        game->has_prev_blocked_tile = false;
+    }
 
     int tile_x = 0;
     int tile_y = 0;

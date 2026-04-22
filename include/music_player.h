@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 bool music_player_start_main_menu_music(void);
+void music_player_update(bool in_world, float delta_time);
 void music_player_shutdown(void);
 
 #endif
