@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 
+#include "settings.h"
 #include "ui.h"
 
 typedef enum UiWidgetType
@@ -22,6 +23,17 @@ typedef enum UiContainerDirection
     UI_CONTAINER_GRID,
 } UiContainerDirection;
 
+typedef enum UiValueBinding
+{
+    UI_VALUE_NONE = 0,
+    UI_VALUE_BOOL_POINTER,
+    UI_VALUE_INT_POINTER,
+    UI_VALUE_STRING_BUFFER,
+    UI_VALUE_INT_SETTING,
+    UI_VALUE_BOOL_SETTING,
+    UI_VALUE_STRING_SETTING,
+} UiValueBinding;
+
 typedef struct UiWidget UiWidget;
 
 struct UiWidget
@@ -32,6 +44,8 @@ struct UiWidget
     bool enabled;
     bool focusable;
     UiAction action;
+    UiValueBinding value_binding;
+    SettingId setting_id;
     UiContainerDirection direction;
     const UiWidget *children;
     int child_count;
@@ -63,21 +77,46 @@ typedef struct UiScreenDefinition
 
 #define UI_TOGGLE(label_, value_) \
     {.type = UI_WIDGET_TOGGLE, .label = label_, .enabled = true, .focusable = true, \
-     .direction = UI_CONTAINER_VERTICAL, .toggle_value = value_}
+     .direction = UI_CONTAINER_VERTICAL, .value_binding = UI_VALUE_BOOL_POINTER, \
+     .toggle_value = value_}
 
 #define UI_SLIDER(label_, value_, min_, max_, step_) \
     {.type = UI_WIDGET_SLIDER, .label = label_, .enabled = true, .focusable = true, \
-     .direction = UI_CONTAINER_VERTICAL, .int_value = value_, .min_value = min_, \
-     .max_value = max_, .step_value = step_}
+     .direction = UI_CONTAINER_VERTICAL, .value_binding = UI_VALUE_INT_POINTER, \
+     .int_value = value_, .min_value = min_, .max_value = max_, \
+     .step_value = step_}
 
 #define UI_EDIT_BOX(label_, value_, capacity_) \
     {.type = UI_WIDGET_EDIT_BOX, .label = label_, .enabled = true, .focusable = true, \
-     .direction = UI_CONTAINER_VERTICAL, .edit_value = value_, .edit_capacity = capacity_}
+     .direction = UI_CONTAINER_VERTICAL, .value_binding = UI_VALUE_STRING_BUFFER, \
+     .edit_value = value_, .edit_capacity = capacity_}
 
 #define UI_PICKER(label_, options_, index_) \
     {.type = UI_WIDGET_PICKER, .label = label_, .enabled = true, .focusable = true, \
-     .direction = UI_CONTAINER_VERTICAL, .picker_options = options_, \
+     .direction = UI_CONTAINER_VERTICAL, .value_binding = UI_VALUE_INT_POINTER, \
+     .picker_options = options_, \
      .picker_option_count = UI_ARRAY_COUNT(options_), .picker_index = index_}
+
+#define UI_SETTING_TOGGLE(label_, setting_id_) \
+    {.type = UI_WIDGET_TOGGLE, .label = label_, .enabled = true, .focusable = true, \
+     .direction = UI_CONTAINER_VERTICAL, .value_binding = UI_VALUE_BOOL_SETTING, \
+     .setting_id = setting_id_}
+
+#define UI_SETTING_SLIDER(label_, setting_id_) \
+    {.type = UI_WIDGET_SLIDER, .label = label_, .enabled = true, .focusable = true, \
+     .direction = UI_CONTAINER_VERTICAL, .value_binding = UI_VALUE_INT_SETTING, \
+     .setting_id = setting_id_}
+
+#define UI_SETTING_EDIT_BOX(label_, setting_id_) \
+    {.type = UI_WIDGET_EDIT_BOX, .label = label_, .enabled = true, .focusable = true, \
+     .direction = UI_CONTAINER_VERTICAL, .value_binding = UI_VALUE_STRING_SETTING, \
+     .setting_id = setting_id_}
+
+#define UI_SETTING_PICKER(label_, options_, setting_id_) \
+    {.type = UI_WIDGET_PICKER, .label = label_, .enabled = true, .focusable = true, \
+     .direction = UI_CONTAINER_VERTICAL, .value_binding = UI_VALUE_INT_SETTING, \
+     .setting_id = setting_id_, .picker_options = options_, \
+     .picker_option_count = UI_ARRAY_COUNT(options_)}
 
 #define UI_VERTICAL_CONTAINER(label_, children_) \
     {.type = UI_WIDGET_CONTAINER, .label = label_, .enabled = true, .focusable = false, \
