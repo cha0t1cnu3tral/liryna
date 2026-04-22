@@ -1,5 +1,7 @@
 #include "music_player.h"
 
+#include "settings.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,6 +49,9 @@ static bool g_fading_out = false;
 static bool g_fading_in = false;
 static float g_transition_timer = 0.0f;
 static TransitionReason g_transition_reason = TRANSITION_NONE;
+
+static int g_current_base_volume = 0;
+static int g_current_effective_volume = -1;
 
 static bool file_exists(const char *path)
 {
@@ -344,14 +349,34 @@ static void close_current_track(void)
     send_mci_command("stop liryna_music");
     send_mci_command("close liryna_music");
     g_track_open = false;
+    g_current_effective_volume = -1;
 }
 
 static bool set_music_volume(int volume)
 {
+    const int clamped_base_volume = SDL_clamp(volume, 0, k_max_music_volume);
+    g_current_base_volume = clamped_base_volume;
+
+    if (!g_track_open)
+    {
+        return true;
+    }
+
+    const int effective_volume = settings_effective_music_mci_volume(clamped_base_volume);
+    if (effective_volume == g_current_effective_volume)
+    {
+        return true;
+    }
+
     char command[128];
-    const int clamped_volume = SDL_clamp(volume, 0, 1000);
-    SDL_snprintf(command, sizeof(command), "setaudio %s volume to %d", k_music_alias, clamped_volume);
-    return send_mci_command(command);
+    SDL_snprintf(command, sizeof(command), "setaudio %s volume to %d", k_music_alias, effective_volume);
+    if (!send_mci_command(command))
+    {
+        return false;
+    }
+
+    g_current_effective_volume = effective_volume;
+    return true;
 }
 
 static bool open_and_play_track(const char *path, bool repeat)
@@ -371,6 +396,7 @@ static bool open_and_play_track(const char *path, bool repeat)
     }
 
     g_track_open = true;
+    g_current_effective_volume = -1;
 
     SDL_snprintf(command, sizeof(command), "set %s time format milliseconds", k_music_alias);
     if (!send_mci_command(command))
@@ -449,14 +475,19 @@ static bool get_current_track_progress_ms(int *out_position_ms, int *out_length_
         return false;
     }
 
+    char command[128];
     char result[64];
-    if (!query_mci_string("status liryna_music position", result, sizeof(result)))
+
+    SDL_snprintf(command, sizeof(command), "status %s position", k_music_alias);
+    if (!query_mci_string(command, result, sizeof(result)))
     {
         return false;
     }
 
     const int position_ms = atoi(result);
-    if (!query_mci_string("status liryna_music length", result, sizeof(result)))
+
+    SDL_snprintf(command, sizeof(command), "status %s length", k_music_alias);
+    if (!query_mci_string(command, result, sizeof(result)))
     {
         return false;
     }
@@ -479,8 +510,11 @@ static bool is_track_playing(void)
         return false;
     }
 
+    char command[128];
     char mode[32];
-    if (!query_mci_string("status liryna_music mode", mode, sizeof(mode)))
+
+    SDL_snprintf(command, sizeof(command), "status %s mode", k_music_alias);
+    if (!query_mci_string(command, mode, sizeof(mode)))
     {
         return false;
     }
@@ -574,6 +608,8 @@ bool music_player_start_main_menu_music(void)
     g_fading_in = false;
     g_transition_reason = TRANSITION_NONE;
     g_transition_timer = 0.0f;
+    g_current_base_volume = k_max_music_volume;
+    g_current_effective_volume = -1;
     return start_menu_track();
 }
 
@@ -615,6 +651,16 @@ void music_player_update(bool in_world, float delta_time)
     update_transition(delta_time);
 }
 
+void music_player_update_volume(void)
+{
+    if (!g_player_initialized || !g_track_open)
+    {
+        return;
+    }
+
+    set_music_volume(g_current_base_volume);
+}
+
 void music_player_shutdown(void)
 {
     close_current_track();
@@ -623,6 +669,8 @@ void music_player_shutdown(void)
     g_fading_in = false;
     g_transition_reason = TRANSITION_NONE;
     g_transition_timer = 0.0f;
+    g_current_base_volume = 0;
+    g_current_effective_volume = -1;
 }
 
 #else
@@ -636,6 +684,10 @@ void music_player_update(bool in_world, float delta_time)
 {
     (void)in_world;
     (void)delta_time;
+}
+
+void music_player_update_volume(void)
+{
 }
 
 void music_player_shutdown(void)

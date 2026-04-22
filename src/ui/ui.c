@@ -81,6 +81,216 @@ static int ui_clamp_int(int value, int min_value, int max_value)
     return value;
 }
 
+static int *ui_widget_local_int_value(const UiWidget *widget)
+{
+    if (widget == NULL)
+    {
+        return NULL;
+    }
+
+    if (widget->type == UI_WIDGET_PICKER)
+    {
+        return widget->picker_index;
+    }
+
+    return widget->int_value;
+}
+
+static bool ui_widget_get_bool_value(const UiWidget *widget, bool *out)
+{
+    if (widget == NULL || out == NULL)
+    {
+        return false;
+    }
+
+    switch (widget->value_binding)
+    {
+    case UI_VALUE_BOOL_POINTER:
+        if (widget->toggle_value == NULL)
+        {
+            return false;
+        }
+        *out = *widget->toggle_value;
+        return true;
+    case UI_VALUE_BOOL_SETTING:
+        if (settings_get_type(widget->setting_id) != SETTING_TYPE_BOOL)
+        {
+            return false;
+        }
+        *out = settings_get_bool(widget->setting_id);
+        return true;
+    case UI_VALUE_NONE:
+    case UI_VALUE_INT_POINTER:
+    case UI_VALUE_STRING_BUFFER:
+    case UI_VALUE_INT_SETTING:
+    case UI_VALUE_STRING_SETTING:
+    default:
+        return false;
+    }
+}
+
+static bool ui_widget_set_bool_value(const UiWidget *widget, bool value)
+{
+    if (widget == NULL)
+    {
+        return false;
+    }
+
+    switch (widget->value_binding)
+    {
+    case UI_VALUE_BOOL_POINTER:
+        if (widget->toggle_value == NULL)
+        {
+            return false;
+        }
+        *widget->toggle_value = value;
+        return true;
+    case UI_VALUE_BOOL_SETTING:
+        if (settings_get_type(widget->setting_id) != SETTING_TYPE_BOOL)
+        {
+            return false;
+        }
+        settings_set_bool(widget->setting_id, value);
+        return true;
+    case UI_VALUE_NONE:
+    case UI_VALUE_INT_POINTER:
+    case UI_VALUE_STRING_BUFFER:
+    case UI_VALUE_INT_SETTING:
+    case UI_VALUE_STRING_SETTING:
+    default:
+        return false;
+    }
+}
+
+static bool ui_widget_get_int_value(const UiWidget *widget, int *out)
+{
+    if (widget == NULL || out == NULL)
+    {
+        return false;
+    }
+
+    switch (widget->value_binding)
+    {
+    case UI_VALUE_INT_POINTER:
+    {
+        int *value = ui_widget_local_int_value(widget);
+        if (value == NULL)
+        {
+            return false;
+        }
+        *out = *value;
+        return true;
+    }
+    case UI_VALUE_INT_SETTING:
+        if (settings_get_type(widget->setting_id) != SETTING_TYPE_INT)
+        {
+            return false;
+        }
+        *out = settings_get_int(widget->setting_id);
+        return true;
+    case UI_VALUE_NONE:
+    case UI_VALUE_BOOL_POINTER:
+    case UI_VALUE_STRING_BUFFER:
+    case UI_VALUE_BOOL_SETTING:
+    case UI_VALUE_STRING_SETTING:
+    default:
+        return false;
+    }
+}
+
+static bool ui_widget_set_int_value(const UiWidget *widget, int value)
+{
+    if (widget == NULL)
+    {
+        return false;
+    }
+
+    switch (widget->value_binding)
+    {
+    case UI_VALUE_INT_POINTER:
+    {
+        int *target = ui_widget_local_int_value(widget);
+        if (target == NULL)
+        {
+            return false;
+        }
+        *target = value;
+        return true;
+    }
+    case UI_VALUE_INT_SETTING:
+        if (settings_get_type(widget->setting_id) != SETTING_TYPE_INT)
+        {
+            return false;
+        }
+        settings_set_int(widget->setting_id, value);
+        return true;
+    case UI_VALUE_NONE:
+    case UI_VALUE_BOOL_POINTER:
+    case UI_VALUE_STRING_BUFFER:
+    case UI_VALUE_BOOL_SETTING:
+    case UI_VALUE_STRING_SETTING:
+    default:
+        return false;
+    }
+}
+
+static int ui_widget_min_int_value(const UiWidget *widget)
+{
+    if (widget != NULL && widget->value_binding == UI_VALUE_INT_SETTING)
+    {
+        return settings_get_int_min(widget->setting_id);
+    }
+
+    return widget != NULL ? widget->min_value : 0;
+}
+
+static int ui_widget_max_int_value(const UiWidget *widget)
+{
+    if (widget != NULL && widget->value_binding == UI_VALUE_INT_SETTING)
+    {
+        return settings_get_int_max(widget->setting_id);
+    }
+
+    return widget != NULL ? widget->max_value : 0;
+}
+
+static int ui_widget_int_step(const UiWidget *widget)
+{
+    if (widget != NULL && widget->value_binding == UI_VALUE_INT_SETTING)
+    {
+        return settings_get_int_step(widget->setting_id);
+    }
+
+    return widget != NULL && widget->step_value > 0 ? widget->step_value : 1;
+}
+
+static const char *ui_widget_string_value(const UiWidget *widget)
+{
+    if (widget == NULL)
+    {
+        return NULL;
+    }
+
+    switch (widget->value_binding)
+    {
+    case UI_VALUE_STRING_BUFFER:
+        return widget->edit_value;
+    case UI_VALUE_STRING_SETTING:
+        if (settings_get_type(widget->setting_id) != SETTING_TYPE_STRING)
+        {
+            return NULL;
+        }
+        return settings_get_string(widget->setting_id);
+    case UI_VALUE_NONE:
+    case UI_VALUE_BOOL_POINTER:
+    case UI_VALUE_INT_POINTER:
+    case UI_VALUE_INT_SETTING:
+    case UI_VALUE_BOOL_SETTING:
+    default:
+        return NULL;
+    }
+}
+
 static bool ui_widget_value_text(const UiWidget *widget, char *out, size_t out_size)
 {
     if (widget == NULL || out == NULL || out_size == 0)
@@ -93,36 +303,48 @@ static bool ui_widget_value_text(const UiWidget *widget, char *out, size_t out_s
     switch (widget->type)
     {
     case UI_WIDGET_TOGGLE:
-        if (widget->toggle_value == NULL)
+    {
+        bool value = false;
+        if (!ui_widget_get_bool_value(widget, &value))
         {
             return false;
         }
-        snprintf(out, out_size, "%s", *widget->toggle_value ? "on" : "off");
+        snprintf(out, out_size, "%s", value ? "on" : "off");
         return true;
+    }
     case UI_WIDGET_SLIDER:
-        if (widget->int_value == NULL)
+    {
+        int value = 0;
+        if (!ui_widget_get_int_value(widget, &value))
         {
             return false;
         }
-        snprintf(out, out_size, "%d", *widget->int_value);
+        snprintf(out, out_size, "%d", value);
         return true;
+    }
     case UI_WIDGET_EDIT_BOX:
-        if (widget->edit_value == NULL || widget->edit_value[0] == '\0')
+    {
+        const char *value = ui_widget_string_value(widget);
+        if (value == NULL || value[0] == '\0')
         {
             snprintf(out, out_size, "empty");
             return true;
         }
-        snprintf(out, out_size, "%s", widget->edit_value);
+        snprintf(out, out_size, "%s", value);
         return true;
+    }
     case UI_WIDGET_PICKER:
-        if (widget->picker_options == NULL || widget->picker_index == NULL ||
-            widget->picker_option_count <= 0)
+        if (widget->picker_options == NULL || widget->picker_option_count <= 0)
         {
             return false;
         }
         {
-            const int index = ui_clamp_int(*widget->picker_index, 0,
-                                           widget->picker_option_count - 1);
+            int value = 0;
+            if (!ui_widget_get_int_value(widget, &value))
+            {
+                return false;
+            }
+            const int index = ui_clamp_int(value, 0, widget->picker_option_count - 1);
             const char *option = widget->picker_options[index];
             snprintf(out, out_size, "%s", option != NULL ? option : "unknown");
         }
@@ -205,34 +427,97 @@ static void ui_delete_last_utf8_char(char *text)
 static bool ui_edit_box_append_text(const UiWidget *widget, const char *text_input)
 {
     if (widget == NULL || widget->type != UI_WIDGET_EDIT_BOX ||
-        widget->edit_value == NULL || widget->edit_capacity == 0 ||
         text_input == NULL || text_input[0] == '\0')
     {
         return false;
     }
 
-    const size_t current_length = strlen(widget->edit_value);
-    if (current_length >= widget->edit_capacity - 1)
+    if (widget->value_binding == UI_VALUE_STRING_BUFFER)
     {
-        return false;
+        if (widget->edit_value == NULL || widget->edit_capacity == 0)
+        {
+            return false;
+        }
+
+        const size_t current_length = strlen(widget->edit_value);
+        if (current_length >= widget->edit_capacity - 1)
+        {
+            return false;
+        }
+
+        const size_t available = widget->edit_capacity - current_length - 1;
+        strncat(widget->edit_value, text_input, available);
+        widget->edit_value[widget->edit_capacity - 1] = '\0';
+        return true;
     }
 
-    const size_t available = widget->edit_capacity - current_length - 1;
-    strncat(widget->edit_value, text_input, available);
-    widget->edit_value[widget->edit_capacity - 1] = '\0';
-    return true;
+    if (widget->value_binding == UI_VALUE_STRING_SETTING &&
+        settings_get_type(widget->setting_id) == SETTING_TYPE_STRING)
+    {
+        char value[256];
+        const size_t capacity = settings_get_string_capacity(widget->setting_id);
+        const char *current = settings_get_string(widget->setting_id);
+        const size_t current_length = strlen(current);
+
+        if (capacity == 0 || current_length >= capacity - 1)
+        {
+            return false;
+        }
+
+        snprintf(value, sizeof(value), "%s", current);
+        const size_t value_length = strlen(value);
+        if (value_length >= sizeof(value) - 1)
+        {
+            return false;
+        }
+
+        const size_t setting_available = capacity - current_length - 1;
+        const size_t buffer_available = sizeof(value) - value_length - 1;
+        const size_t available =
+            setting_available < buffer_available ? setting_available : buffer_available;
+        strncat(value, text_input, available);
+        settings_set_string(widget->setting_id, value);
+        return true;
+    }
+
+    return false;
 }
 
 static bool ui_edit_box_backspace(const UiWidget *widget)
 {
-    if (widget == NULL || widget->type != UI_WIDGET_EDIT_BOX ||
-        widget->edit_value == NULL || widget->edit_value[0] == '\0')
+    if (widget == NULL || widget->type != UI_WIDGET_EDIT_BOX)
     {
         return false;
     }
 
-    ui_delete_last_utf8_char(widget->edit_value);
-    return true;
+    if (widget->value_binding == UI_VALUE_STRING_BUFFER)
+    {
+        if (widget->edit_value == NULL || widget->edit_value[0] == '\0')
+        {
+            return false;
+        }
+
+        ui_delete_last_utf8_char(widget->edit_value);
+        return true;
+    }
+
+    if (widget->value_binding == UI_VALUE_STRING_SETTING &&
+        settings_get_type(widget->setting_id) == SETTING_TYPE_STRING)
+    {
+        char value[256];
+        const char *current = settings_get_string(widget->setting_id);
+        if (current[0] == '\0')
+        {
+            return false;
+        }
+
+        snprintf(value, sizeof(value), "%s", current);
+        ui_delete_last_utf8_char(value);
+        settings_set_string(widget->setting_id, value);
+        return true;
+    }
+
+    return false;
 }
 
 static void ui_announce_widget_value(const UiWidget *widget, UiAnnounceFn announce,
@@ -264,48 +549,60 @@ static bool ui_adjust_widget_value(const UiWidget *widget, int delta, bool activ
     switch (widget->type)
     {
     case UI_WIDGET_TOGGLE:
-        if (widget->toggle_value == NULL)
+    {
+        bool value = false;
+        if (!ui_widget_get_bool_value(widget, &value))
         {
             return false;
         }
 
         if (activate || delta == 0)
         {
-            *widget->toggle_value = !*widget->toggle_value;
+            return ui_widget_set_bool_value(widget, !value);
         }
-        else
-        {
-            *widget->toggle_value = delta > 0;
-        }
-        return true;
+        return ui_widget_set_bool_value(widget, delta > 0);
+    }
     case UI_WIDGET_SLIDER:
-        if (widget->int_value == NULL || delta == 0)
+        if (delta == 0)
         {
             return false;
         }
         {
-            const int step = widget->step_value > 0 ? widget->step_value : 1;
-            const int next_value = *widget->int_value + (delta * step);
-            *widget->int_value = ui_clamp_int(next_value, widget->min_value,
-                                              widget->max_value);
+            int value = 0;
+            if (!ui_widget_get_int_value(widget, &value))
+            {
+                return false;
+            }
+
+            const int step = ui_widget_int_step(widget);
+            const int next_value = value + (delta * step);
+            return ui_widget_set_int_value(
+                widget, ui_clamp_int(next_value, ui_widget_min_int_value(widget),
+                                     ui_widget_max_int_value(widget)));
         }
-        return true;
     case UI_WIDGET_PICKER:
-        if (widget->picker_index == NULL || widget->picker_option_count <= 0 ||
-            delta == 0)
+        if (widget->picker_option_count <= 0 || delta == 0)
         {
             return false;
         }
-        *widget->picker_index += delta;
-        while (*widget->picker_index < 0)
         {
-            *widget->picker_index += widget->picker_option_count;
+            int value = 0;
+            if (!ui_widget_get_int_value(widget, &value))
+            {
+                return false;
+            }
+
+            value += delta;
+            while (value < 0)
+            {
+                value += widget->picker_option_count;
+            }
+            while (value >= widget->picker_option_count)
+            {
+                value -= widget->picker_option_count;
+            }
+            return ui_widget_set_int_value(widget, value);
         }
-        while (*widget->picker_index >= widget->picker_option_count)
-        {
-            *widget->picker_index -= widget->picker_option_count;
-        }
-        return true;
     case UI_WIDGET_EDIT_BOX:
     case UI_WIDGET_CONTAINER:
     case UI_WIDGET_BUTTON:
