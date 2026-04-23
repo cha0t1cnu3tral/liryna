@@ -41,7 +41,10 @@ static const char *ui_widget_type_name(UiWidgetType type)
 
 static bool ui_is_external_action(UiAction action)
 {
-    return action == UI_ACTION_NEW_WORLD || action == UI_ACTION_EXIT;
+    return action == UI_ACTION_START_WORLD_SURVIVAL ||
+           action == UI_ACTION_START_WORLD_CREATIVE ||
+           action == UI_ACTION_SELECT_CREATIVE_TILE ||
+           action == UI_ACTION_EXIT;
 }
 
 static bool ui_is_valid(const UiState *ui)
@@ -964,6 +967,9 @@ static bool ui_handle_internal_action(UiState *ui, UiAction selected_action,
 {
     switch (selected_action)
     {
+    case UI_ACTION_NEW_WORLD:
+        ui_push_screen(ui, UI_SCREEN_NEW_WORLD, announce);
+        return true;
     case UI_ACTION_OPEN_SAVED_WORLDS:
         ui_push_screen(ui, UI_SCREEN_SAVED_WORLDS, announce);
         return true;
@@ -980,7 +986,9 @@ static bool ui_handle_internal_action(UiState *ui, UiAction selected_action,
         ui_pop_screen(ui, announce);
         return true;
     case UI_ACTION_NONE:
-    case UI_ACTION_NEW_WORLD:
+    case UI_ACTION_START_WORLD_SURVIVAL:
+    case UI_ACTION_START_WORLD_CREATIVE:
+    case UI_ACTION_SELECT_CREATIVE_TILE:
     case UI_ACTION_EXIT:
     default:
         return false;
@@ -1251,4 +1259,26 @@ void ui_show_screen(UiState *ui, UiScreen screen, UiAnnounceFn announce)
     }
 
     ui_set_screen_internal(ui, screen, announce);
+}
+
+const char *ui_focused_widget_label(const UiState *ui)
+{
+    if (!ui_is_valid(ui))
+    {
+        return NULL;
+    }
+
+    const UiScreenDefinition *screen = ui_get_screen_definition(ui->screen);
+    if (screen == NULL)
+    {
+        return NULL;
+    }
+
+    const UiWidget *widget = ui_get_focused_widget(ui, screen);
+    if (widget == NULL)
+    {
+        return NULL;
+    }
+
+    return widget->label;
 }

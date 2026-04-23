@@ -8,6 +8,10 @@ const UiScreenDefinition *ui_get_screen_definition(UiScreen screen)
     {
     case UI_SCREEN_MENU:
         return ui_main_menu_screen();
+    case UI_SCREEN_NEW_WORLD:
+        return ui_new_world_screen();
+    case UI_SCREEN_CREATIVE_INVENTORY:
+        return ui_creative_inventory_screen();
     case UI_SCREEN_SAVED_WORLDS:
         return ui_saved_worlds_screen();
     case UI_SCREEN_SETTINGS:

@@ -4,10 +4,12 @@
 #include <time.h>
 
 #include "engine.h"
+#include "inventory.h"
 #include "music_player.h"
 #include "opening_scene.h"
 #include "settings.h"
 #include "speech.h"
+#include "tile_categories.h"
 #include "water_biome_audio.h"
 #include "ui/ui.h"
 #include "world/world.h"
@@ -18,6 +20,8 @@ typedef struct Game
     World world;
     bool world_loaded;
     bool speech_ready;
+    GameMode game_mode;
+    Inventory inventory;
 
     bool prev_up;
     bool prev_down;
@@ -34,6 +38,7 @@ typedef struct Game
     bool prev_home;
     bool prev_tab;
     bool prev_space;
+    bool prev_e;
 
     bool has_prev_tile;
     int prev_tile_x;
@@ -46,165 +51,19 @@ typedef struct Game
     int tracker_object_index;
 } Game;
 
-typedef enum TrackerCategory
-{
-    TRACKER_CATEGORY_TREES = 0,
-    TRACKER_CATEGORY_PLANTS,
-    TRACKER_CATEGORY_ROCKS,
-    TRACKER_CATEGORY_FURNITURE,
-    TRACKER_CATEGORY_WATER,
-    TRACKER_CATEGORY_STRUCTURES,
-    TRACKER_CATEGORY_TERRAIN,
-    TRACKER_CATEGORY_MISC
-} TrackerCategory;
-
-static const TrackerCategory k_tracker_categories[] = {
-    TRACKER_CATEGORY_TREES,
-    TRACKER_CATEGORY_PLANTS,
-    TRACKER_CATEGORY_ROCKS,
-    TRACKER_CATEGORY_FURNITURE,
-    TRACKER_CATEGORY_WATER,
-    TRACKER_CATEGORY_STRUCTURES,
-    TRACKER_CATEGORY_TERRAIN,
-    TRACKER_CATEGORY_MISC,
+static const TileCategory k_tracker_categories[] = {
+    TILE_CATEGORY_TREES,
+    TILE_CATEGORY_PLANTS,
+    TILE_CATEGORY_ROCKS,
+    TILE_CATEGORY_FURNITURE,
+    TILE_CATEGORY_WATER,
+    TILE_CATEGORY_STRUCTURES,
+    TILE_CATEGORY_TERRAIN,
+    TILE_CATEGORY_MISC,
 };
 
 static const int k_tracker_category_count =
     (int)(sizeof(k_tracker_categories) / sizeof(k_tracker_categories[0]));
-
-static const char *tracker_category_name(TrackerCategory category)
-{
-    switch (category)
-    {
-    case TRACKER_CATEGORY_TREES:
-        return "Trees";
-    case TRACKER_CATEGORY_PLANTS:
-        return "Plants";
-    case TRACKER_CATEGORY_ROCKS:
-        return "Rocks";
-    case TRACKER_CATEGORY_FURNITURE:
-        return "Furniture";
-    case TRACKER_CATEGORY_WATER:
-        return "Water";
-    case TRACKER_CATEGORY_STRUCTURES:
-        return "Structures";
-    case TRACKER_CATEGORY_TERRAIN:
-        return "Terrain";
-    case TRACKER_CATEGORY_MISC:
-    default:
-        return "Misc";
-    }
-}
-
-static TrackerCategory tracker_category_for_tile(const TileDefinition *tile)
-{
-    if (tile == NULL)
-    {
-        return TRACKER_CATEGORY_MISC;
-    }
-
-    switch (tile->id)
-    {
-    case TILE_TREEOAK:
-    case TILE_TREEPINE:
-    case TILE_TREEBIRCH:
-    case TILE_TREEPALM:
-    case TILE_TREEDEAD:
-    case TILE_TREEBURNT:
-    case TILE_TREESAPLING:
-        return TRACKER_CATEGORY_TREES;
-    case TILE_BUSH:
-    case TILE_BERRYBUSH:
-    case TILE_FLOWERPATCH:
-    case TILE_TALLWEEDS:
-    case TILE_VINEPATCH:
-    case TILE_VINES:
-    case TILE_MUSHROOMPATCH:
-    case TILE_GIANTMUSHROOM:
-    case TILE_CACTUS:
-    case TILE_DESERT_SHRUB:
-        return TRACKER_CATEGORY_PLANTS;
-    case TILE_BOULDER:
-    case TILE_ROCKCLUSTER:
-    case TILE_LARGEROCK:
-    case TILE_CAVEENTRANCE:
-        return TRACKER_CATEGORY_ROCKS;
-    case TILE_TABLE:
-    case TILE_TABLEROUND:
-    case TILE_TABLELONG:
-    case TILE_CHAIRWOOD:
-    case TILE_CHAIRMETAL:
-    case TILE_SOFA:
-    case TILE_BED:
-    case TILE_BUNKBED:
-    case TILE_CABINET:
-    case TILE_SHELF:
-    case TILE_BOOKSHELF:
-    case TILE_CHEST:
-    case TILE_LOCKER:
-    case TILE_DESK:
-    case TILE_OFFICEDESK:
-    case TILE_LAMP:
-    case TILE_CEILINGLIGHT:
-    case TILE_FLOORLAMP:
-    case TILE_STOVE:
-    case TILE_OVEN:
-    case TILE_SINK:
-    case TILE_BATHTUB:
-    case TILE_TOILET:
-    case TILE_SHOWER:
-    case TILE_FRIDGE:
-    case TILE_WASHINGMACHINE:
-    case TILE_DRYER:
-    case TILE_SMALLAXE:
-    case TILE_PICKAXE:
-    case TILE_READER:
-    case TILE_RADIO:
-        return TRACKER_CATEGORY_FURNITURE;
-    case TILE_WOODFOUNDATION:
-    case TILE_STONEFOUNDATION:
-    case TILE_CONCRETEFOUNDATION:
-    case TILE_BRICKFOUNDATION:
-    case TILE_STEELFOUNDATION:
-    case TILE_REINFORCEDFOUNDATION:
-    case TILE_PIER:
-    case TILE_CARPET:
-    case TILE_LOGWALL:
-    case TILE_PLANKWALL:
-    case TILE_STONEWALL:
-    case TILE_BRICKWALL:
-    case TILE_CONCRETEWALL:
-    case TILE_REINFORCEDWALL:
-    case TILE_STEELWALL:
-    case TILE_GLASSWALL:
-    case TILE_METALWALL:
-    case TILE_FENCEWOOD:
-    case TILE_FENCEMETAL:
-    case TILE_FENCESTONE:
-    case TILE_FENCECHAIN:
-    case TILE_FENCEBARBED:
-    case TILE_BARRICADEWOOD:
-    case TILE_BARRICADESANDBAG:
-    case TILE_RUINEDWALL:
-    case TILE_CRACKEDWALL:
-    case TILE_SHIPPIECE:
-        return TRACKER_CATEGORY_STRUCTURES;
-    default:
-        break;
-    }
-
-    if (tile->is_liquid)
-    {
-        return TRACKER_CATEGORY_WATER;
-    }
-
-    if (tile->layer == TILE_LAYER_GROUND || tile->layer == TILE_LAYER_FLOOR)
-    {
-        return TRACKER_CATEGORY_TERRAIN;
-    }
-
-    return TRACKER_CATEGORY_MISC;
-}
 
 static void game_announce(const char *text, bool interrupt)
 {
@@ -342,7 +201,7 @@ static void game_announce_blocked_feature_ahead(Game *game, int move_dir_x, int 
 }
 
 static bool game_find_object_in_category(const World *world,
-                                         TrackerCategory category,
+                                         TileCategory category,
                                          int target_index,
                                          int *out_total,
                                          int *out_x,
@@ -367,7 +226,7 @@ static bool game_find_object_in_category(const World *world,
         {
             const int index = (y * world->width) + x;
             const TileDefinition *tile = tiles_get_definition(world->tiles[index]);
-            if (tile == NULL || tracker_category_for_tile(tile) != category)
+            if (tile == NULL || tile_category_for_definition(tile) != category)
             {
                 continue;
             }
@@ -418,8 +277,8 @@ static void game_announce_tracker_focus(Game *game, bool interrupt)
         return;
     }
 
-    const TrackerCategory category = k_tracker_categories[game->tracker_category_index];
-    const char *category_name = tracker_category_name(category);
+    const TileCategory category = k_tracker_categories[game->tracker_category_index];
+    const char *category_name = tile_category_name(category);
     int total = 0;
     int object_x = 0;
     int object_y = 0;
@@ -454,7 +313,7 @@ static void game_announce_tracker_coordinates(Game *game, bool interrupt)
         return;
     }
 
-    const TrackerCategory category = k_tracker_categories[game->tracker_category_index];
+    const TileCategory category = k_tracker_categories[game->tracker_category_index];
     int total = 0;
     int object_x = 0;
     int object_y = 0;
@@ -476,7 +335,7 @@ static void game_announce_tracker_coordinates(Game *game, bool interrupt)
     game_announce(message, interrupt);
 }
 
-static bool game_create_new_world(Game *game)
+static bool game_create_new_world(Game *game, GameMode mode)
 {
     enum
     {
@@ -503,14 +362,21 @@ static bool game_create_new_world(Game *game)
     }
 
     game->world_loaded = true;
-    game_place_opening_wreckage(game);
+    game->game_mode = mode;
+    inventory_init(&game->inventory, mode);
+    if (mode == GAME_MODE_SURVIVAL)
+    {
+        game_place_opening_wreckage(game);
+    }
     game->has_prev_tile = false;
     game->tracker_category_index = 0;
     game->tracker_object_index = 0;
     game->has_prev_blocked_tile = false;
     game->prev_blocked_tile_x = -1;
     game->prev_blocked_tile_y = -1;
-    game_announce("New world ready.", false);
+    game_announce(mode == GAME_MODE_CREATIVE ? "Creative world ready."
+                                             : "Survival world ready.",
+                  false);
     return true;
 }
 
@@ -535,6 +401,7 @@ static void game_init(Engine *engine, void *userdata)
     game->prev_home = false;
     game->prev_tab = false;
     game->prev_space = false;
+    game->prev_e = false;
     game->has_prev_tile = false;
     game->prev_tile_x = -1;
     game->prev_tile_y = -1;
@@ -543,6 +410,8 @@ static void game_init(Engine *engine, void *userdata)
     game->prev_blocked_tile_y = -1;
     game->tracker_category_index = 0;
     game->tracker_object_index = 0;
+    game->game_mode = GAME_MODE_SURVIVAL;
+    inventory_init(&game->inventory, GAME_MODE_SURVIVAL);
 
     game->speech_ready = speech_init();
     if (!settings_load())
@@ -593,6 +462,7 @@ static void game_update(Engine *engine, void *userdata)
     const bool home_now = engine_key_down(engine, SDL_SCANCODE_HOME);
     const bool tab_now = engine_key_down(engine, SDL_SCANCODE_TAB);
     const bool space_now = engine_key_down(engine, SDL_SCANCODE_SPACE);
+    const bool e_now = engine_key_down(engine, SDL_SCANCODE_E);
     const bool shift_now = engine_key_down(engine, SDL_SCANCODE_LSHIFT) ||
                            engine_key_down(engine, SDL_SCANCODE_RSHIFT);
     const bool ctrl_now = engine_key_down(engine, SDL_SCANCODE_LCTRL) ||
@@ -615,6 +485,7 @@ static void game_update(Engine *engine, void *userdata)
     const bool home_pressed = home_now && !game->prev_home;
     const bool tab_pressed = tab_now && !game->prev_tab;
     const bool space_pressed = space_now && !game->prev_space;
+    const bool e_pressed = e_now && !game->prev_e;
     const bool next_container_pressed = tab_pressed && !shift_now;
     const bool previous_container_pressed = tab_pressed && shift_now;
 
@@ -633,6 +504,7 @@ static void game_update(Engine *engine, void *userdata)
     game->prev_home = home_now;
     game->prev_tab = tab_now;
     game->prev_space = space_now;
+    game->prev_e = e_now;
 
     UiAction action = UI_ACTION_NONE;
     ui_update(&game->ui, up_pressed, down_pressed, left_pressed, right_pressed,
@@ -648,18 +520,63 @@ static void game_update(Engine *engine, void *userdata)
         return;
     }
 
-    if (action == UI_ACTION_NEW_WORLD)
+    if (action == UI_ACTION_START_WORLD_SURVIVAL ||
+        action == UI_ACTION_START_WORLD_CREATIVE)
     {
         game_announce("Generating new world.", true);
-        if (game_create_new_world(game))
+        const GameMode mode = action == UI_ACTION_START_WORLD_CREATIVE
+                                  ? GAME_MODE_CREATIVE
+                                  : GAME_MODE_SURVIVAL;
+        if (game_create_new_world(game, mode))
         {
             ui_show_screen(&game->ui, UI_SCREEN_WORLD,
                            game->speech_ready ? game_announce : NULL);
-            opening_scene_start(game->speech_ready ? game_announce : NULL);
+            if (mode == GAME_MODE_SURVIVAL)
+            {
+                opening_scene_start(game->speech_ready ? game_announce : NULL);
+            }
         }
         else
         {
             ui_init(&game->ui, game->speech_ready ? game_announce : NULL);
+        }
+    }
+
+    if (action == UI_ACTION_SELECT_CREATIVE_TILE)
+    {
+        const char *label = ui_focused_widget_label(&game->ui);
+        const TileId selected_tile = tiles_find_by_name(label);
+        if (selected_tile != TILE_ID_COUNT)
+        {
+            game->inventory.selected_tile = selected_tile;
+            char message[192];
+            snprintf(message, sizeof(message), "%s selected.",
+                     label != NULL ? label : "Tile");
+            game_announce(message, true);
+            ui_show_screen(&game->ui, UI_SCREEN_WORLD,
+                           game->speech_ready ? game_announce : NULL);
+        }
+    }
+
+    if (e_pressed)
+    {
+        const UiScreen screen = ui_screen(&game->ui);
+        if (screen == UI_SCREEN_WORLD && game->world_loaded)
+        {
+            if (game->game_mode == GAME_MODE_CREATIVE)
+            {
+                ui_show_screen(&game->ui, UI_SCREEN_CREATIVE_INVENTORY,
+                               game->speech_ready ? game_announce : NULL);
+            }
+            else
+            {
+                game_announce("Inventory is only available in creative right now.", true);
+            }
+        }
+        else if (screen == UI_SCREEN_CREATIVE_INVENTORY)
+        {
+            ui_show_screen(&game->ui, UI_SCREEN_WORLD,
+                           game->speech_ready ? game_announce : NULL);
         }
     }
 
@@ -852,7 +769,7 @@ static void game_update(Engine *engine, void *userdata)
     }
     else if (page_up_pressed || page_down_pressed)
     {
-        const TrackerCategory category = k_tracker_categories[game->tracker_category_index];
+        const TileCategory category = k_tracker_categories[game->tracker_category_index];
         int total = 0;
         const bool has_object =
             game_find_object_in_category(&game->world, category, 0, &total, NULL, NULL, NULL);
