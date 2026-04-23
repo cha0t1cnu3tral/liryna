@@ -5,6 +5,7 @@
 
 #include "engine.h"
 #include "music_player.h"
+#include "opening_scene.h"
 #include "settings.h"
 #include "speech.h"
 #include "water_biome_audio.h"
@@ -155,6 +156,10 @@ static TrackerCategory tracker_category_for_tile(const TileDefinition *tile)
     case TILE_FRIDGE:
     case TILE_WASHINGMACHINE:
     case TILE_DRYER:
+    case TILE_SMALLAXE:
+    case TILE_PICKAXE:
+    case TILE_READER:
+    case TILE_RADIO:
         return TRACKER_CATEGORY_FURNITURE;
     case TILE_WOODFOUNDATION:
     case TILE_STONEFOUNDATION:
@@ -182,6 +187,7 @@ static TrackerCategory tracker_category_for_tile(const TileDefinition *tile)
     case TILE_BARRICADESANDBAG:
     case TILE_RUINEDWALL:
     case TILE_CRACKEDWALL:
+    case TILE_SHIPPIECE:
         return TRACKER_CATEGORY_STRUCTURES;
     default:
         break;
@@ -229,6 +235,41 @@ static bool game_is_feature_blocking_tile(const TileDefinition *tile)
     return tile != NULL &&
            tile->blocks_land_movement &&
            (tile->layer == TILE_LAYER_OBJECT || tile->layer == TILE_LAYER_STRUCTURE);
+}
+
+static void game_set_world_tile_if_in_bounds(World *world, int tile_x, int tile_y, TileId tile_id)
+{
+    if (world == NULL || world->tiles == NULL || world->width <= 0 || world->height <= 0)
+    {
+        return;
+    }
+
+    if (tile_x < 0 || tile_y < 0 || tile_x >= world->width || tile_y >= world->height)
+    {
+        return;
+    }
+
+    world->tiles[(tile_y * world->width) + tile_x] = tile_id;
+}
+
+static void game_place_opening_wreckage(Game *game)
+{
+    if (game == NULL || !game->world_loaded || game->world.tile_size <= 0)
+    {
+        return;
+    }
+
+    const int spawn_x = (int)(game->world.player_x / (float)game->world.tile_size);
+    const int spawn_y = (int)(game->world.player_y / (float)game->world.tile_size);
+
+    game_set_world_tile_if_in_bounds(&game->world, spawn_x + 1, spawn_y, TILE_SMALLAXE);
+    game_set_world_tile_if_in_bounds(&game->world, spawn_x + 2, spawn_y, TILE_PICKAXE);
+    game_set_world_tile_if_in_bounds(&game->world, spawn_x + 1, spawn_y + 1, TILE_READER);
+    game_set_world_tile_if_in_bounds(&game->world, spawn_x, spawn_y + 1, TILE_RADIO);
+
+    game_set_world_tile_if_in_bounds(&game->world, spawn_x - 1, spawn_y - 1, TILE_SHIPPIECE);
+    game_set_world_tile_if_in_bounds(&game->world, spawn_x - 2, spawn_y - 1, TILE_SHIPPIECE);
+    game_set_world_tile_if_in_bounds(&game->world, spawn_x - 1, spawn_y - 2, TILE_SHIPPIECE);
 }
 
 static void game_announce_blocked_feature_ahead(Game *game, int move_dir_x, int move_dir_y)
@@ -439,7 +480,8 @@ static bool game_create_new_world(Game *game)
 {
     enum
     {
-        WORLD_SIZE_TILES = 200,
+        WORLD_WIDTH_TILES = 360,
+        WORLD_HEIGHT_TILES = 240,
     };
 
     if (game == NULL)
@@ -453,7 +495,7 @@ static bool game_create_new_world(Game *game)
         game->world_loaded = false;
     }
 
-    if (!world_init(&game->world, WORLD_SIZE_TILES, WORLD_SIZE_TILES, 32))
+    if (!world_init(&game->world, WORLD_WIDTH_TILES, WORLD_HEIGHT_TILES, 32))
     {
         fprintf(stderr, "game: world initialization failed\n");
         game_announce("New world generation failed.", true);
@@ -461,6 +503,7 @@ static bool game_create_new_world(Game *game)
     }
 
     game->world_loaded = true;
+    game_place_opening_wreckage(game);
     game->has_prev_tile = false;
     game->tracker_category_index = 0;
     game->tracker_object_index = 0;
@@ -514,6 +557,10 @@ static void game_init(Engine *engine, void *userdata)
     if (!water_biome_audio_init())
     {
         fprintf(stderr, "game: water biome audio failed to start\n");
+    }
+    if (!opening_scene_init())
+    {
+        fprintf(stderr, "game: opening scene audio failed to start\n");
     }
 
     srand((unsigned int)time(NULL));
@@ -608,6 +655,7 @@ static void game_update(Engine *engine, void *userdata)
         {
             ui_show_screen(&game->ui, UI_SCREEN_WORLD,
                            game->speech_ready ? game_announce : NULL);
+            opening_scene_start(game->speech_ready ? game_announce : NULL);
         }
         else
         {
@@ -616,11 +664,32 @@ static void game_update(Engine *engine, void *userdata)
     }
 
     const bool in_world_screen = ui_screen(&game->ui) == UI_SCREEN_WORLD && game->world_loaded;
-    music_player_update(in_world_screen, engine_delta_time(engine));
+    if (!in_world_screen && opening_scene_is_active())
+    {
+        opening_scene_cancel();
+    }
+
+    const float delta_time = engine_delta_time(engine);
+    if (in_world_screen)
+    {
+        opening_scene_update(delta_time, enter_pressed, game->speech_ready ? game_announce : NULL);
+    }
+
+    const bool opening_scene_active = in_world_screen && opening_scene_is_active();
+    music_player_set_suspended(opening_scene_active);
+    music_player_update(in_world_screen, delta_time);
 
     if (!in_world_screen)
     {
-        water_biome_audio_update(NULL, engine_delta_time(engine));
+        water_biome_audio_update(NULL, delta_time);
+        game->has_prev_tile = false;
+        game->has_prev_blocked_tile = false;
+        return;
+    }
+
+    if (opening_scene_active)
+    {
+        water_biome_audio_update(NULL, delta_time);
         game->has_prev_tile = false;
         game->has_prev_blocked_tile = false;
         return;
@@ -655,8 +724,8 @@ static void game_update(Engine *engine, void *userdata)
 
     const float player_x_before = game->world.player_x;
     const float player_y_before = game->world.player_y;
-    world_update(&game->world, engine_delta_time(engine), move_x, move_y, space_pressed);
-    water_biome_audio_update(&game->world, engine_delta_time(engine));
+    world_update(&game->world, delta_time, move_x, move_y, space_pressed);
+    water_biome_audio_update(&game->world, delta_time);
 
     if (move_x != 0.0f || move_y != 0.0f)
     {
@@ -854,6 +923,7 @@ static void game_shutdown(Engine *engine, void *userdata)
     }
 
     music_player_shutdown();
+    opening_scene_shutdown();
     water_biome_audio_shutdown();
     settings_save();
     speech_shutdown();

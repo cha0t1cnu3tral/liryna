@@ -32,6 +32,7 @@ typedef struct BiomeAudioTrack
 } BiomeAudioTrack;
 
 static bool g_audio_started = false;
+static bool g_tracks_playing = false;
 static float g_update_timer = 0.0f;
 static float g_tundra_loop_fade = 1.0f;
 static unsigned int g_rng_state = 0xA341316Cu;
@@ -519,15 +520,45 @@ static bool init_track(BiomeAudioTrack *track)
     SDL_snprintf(command, sizeof(command), "status %s length", track->alias);
     (void)read_mci_unsigned(command, &track->length_ms);
 
-    SDL_snprintf(command, sizeof(command), "play %s repeat", track->alias);
-    if (!send_mci_command(command))
+    return true;
+}
+
+static void start_all_tracks(void)
+{
+    if (!g_audio_started || g_tracks_playing)
     {
-        SDL_snprintf(command, sizeof(command), "close %s", track->alias);
-        send_mci_command(command);
-        return false;
+        return;
     }
 
-    return true;
+    for (size_t i = 0; i < k_track_count; i++)
+    {
+        char command[160];
+        SDL_snprintf(command, sizeof(command), "seek %s to start", g_tracks[i].alias);
+        send_mci_command(command);
+        SDL_snprintf(command, sizeof(command), "play %s repeat", g_tracks[i].alias);
+        send_mci_command(command);
+    }
+
+    g_tracks_playing = true;
+}
+
+static void stop_all_tracks(void)
+{
+    if (!g_audio_started || !g_tracks_playing)
+    {
+        return;
+    }
+
+    for (size_t i = 0; i < k_track_count; i++)
+    {
+        char command[160];
+        SDL_snprintf(command, sizeof(command), "stop %s", g_tracks[i].alias);
+        send_mci_command(command);
+        SDL_snprintf(command, sizeof(command), "seek %s to start", g_tracks[i].alias);
+        send_mci_command(command);
+    }
+
+    g_tracks_playing = false;
 }
 
 bool water_biome_audio_init(void)
@@ -554,6 +585,7 @@ bool water_biome_audio_init(void)
     }
 
     g_audio_started = true;
+    g_tracks_playing = false;
     g_update_timer = 0.0f;
     g_tundra_loop_fade = 1.0f;
     return true;
@@ -572,6 +604,7 @@ void water_biome_audio_update(const World *world, float delta_time)
     if (!g_audio_started || world == NULL || world->tiles == NULL || world->biomes == NULL ||
         world->width <= 0 || world->height <= 0 || world->tile_size <= 0)
     {
+        stop_all_tracks();
         for (size_t i = 0; i < k_track_count; i++)
         {
             set_track_channel_volume(&g_tracks[i], 0, 0);
@@ -580,6 +613,8 @@ void water_biome_audio_update(const World *world, float delta_time)
         g_have_previous_player_position = false;
         return;
     }
+
+    start_all_tracks();
 
     const int player_tile_x = (int)(world->player_x / (float)world->tile_size);
     const int player_tile_y = (int)(world->player_y / (float)world->tile_size);
@@ -722,6 +757,7 @@ void water_biome_audio_shutdown(void)
     }
 
     g_audio_started = false;
+    g_tracks_playing = false;
     g_update_timer = 0.0f;
     g_tundra_loop_fade = 1.0f;
     g_have_previous_player_position = false;

@@ -621,13 +621,13 @@ bool world_generate_procedural(World *world, unsigned int seed)
             const float distance_from_center = sqrtf((nx * nx) + (ny * ny));
 
             const float elevation_noise = world_generation_fractal_noise(
-                (float)x * 0.055f, (float)y * 0.055f, seed + 17U, 4);
+                (float)x * 0.024f, (float)y * 0.024f, seed + 17U, 4);
             const float moisture = world_generation_fractal_noise(
-                (float)x * 0.048f, (float)y * 0.048f, seed + 47U, 3);
+                (float)x * 0.020f, (float)y * 0.020f, seed + 47U, 3);
 
             float temperature = world_generation_fractal_noise(
-                (float)x * 0.04f, (float)y * 0.04f, seed + 83U, 3);
-            temperature -= fabsf(ny) * 0.35f;
+                (float)x * 0.017f, (float)y * 0.017f, seed + 83U, 3);
+            temperature -= fabsf(ny) * 0.42f;
             if (temperature < 0.0f)
             {
                 temperature = 0.0f;
@@ -672,7 +672,8 @@ bool world_generate_procedural(World *world, unsigned int seed)
 
 bool world_find_spawn_tile(const World *world, int *out_x, int *out_y)
 {
-    if (world == NULL || world->tiles == NULL || out_x == NULL || out_y == NULL)
+    if (world == NULL || world->tiles == NULL || world->biomes == NULL || out_x == NULL ||
+        out_y == NULL)
     {
         return false;
     }
@@ -681,34 +682,53 @@ bool world_find_spawn_tile(const World *world, int *out_x, int *out_y)
     const int center_y = world->height / 2;
     const int max_radius = world->width > world->height ? world->width : world->height;
 
-    for (int radius = 0; radius <= max_radius; radius++)
+    for (int pass = 0; pass < 4; pass++)
     {
-        const int min_x = center_x - radius;
-        const int max_x = center_x + radius;
-        const int min_y = center_y - radius;
-        const int max_y = center_y + radius;
-
-        for (int y = min_y; y <= max_y; y++)
+        for (int radius = 0; radius <= max_radius; radius++)
         {
-            for (int x = min_x; x <= max_x; x++)
+            const int min_x = center_x - radius;
+            const int max_x = center_x + radius;
+            const int min_y = center_y - radius;
+            const int max_y = center_y + radius;
+
+            for (int y = min_y; y <= max_y; y++)
             {
-                if (x < 0 || y < 0 || x >= world->width || y >= world->height)
+                for (int x = min_x; x <= max_x; x++)
                 {
-                    continue;
-                }
+                    if (x < 0 || y < 0 || x >= world->width || y >= world->height)
+                    {
+                        continue;
+                    }
 
-                if (x != min_x && x != max_x && y != min_y && y != max_y)
-                {
-                    continue;
-                }
+                    if (x != min_x && x != max_x && y != min_y && y != max_y)
+                    {
+                        continue;
+                    }
 
-                const TileDefinition *tile =
-                    tiles_get_definition(world->tiles[world_generation_index_from_xy(world, x, y)]);
-                if (tile != NULL && tile->walkable && !tile->blocks_land_movement)
-                {
-                    *out_x = x;
-                    *out_y = y;
-                    return true;
+                    const int index = world_generation_index_from_xy(world, x, y);
+                    const BiomeType biome = world->biomes[index];
+                    if (pass == 0 && biome != BIOME_PLAINS)
+                    {
+                        continue;
+                    }
+                    if (pass == 1 &&
+                        (biome == BIOME_TUNDRA || biome == BIOME_SNOWY_MOUNTAINS ||
+                         world_generation_is_water_biome(biome)))
+                    {
+                        continue;
+                    }
+                    if (pass == 2 && world_generation_is_water_biome(biome))
+                    {
+                        continue;
+                    }
+
+                    const TileDefinition *tile = tiles_get_definition(world->tiles[index]);
+                    if (tile != NULL && tile->walkable && !tile->blocks_land_movement)
+                    {
+                        *out_x = x;
+                        *out_y = y;
+                        return true;
+                    }
                 }
             }
         }

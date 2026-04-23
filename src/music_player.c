@@ -38,6 +38,7 @@ static const int k_max_music_volume = 500;
 static bool g_player_initialized = false;
 static bool g_track_open = false;
 static bool g_world_tracks_loaded = false;
+static bool g_suspended = false;
 
 static char g_world_tracks[MAX_WORLD_TRACKS][1024];
 static int g_world_track_count = 0;
@@ -602,6 +603,7 @@ static void update_transition(float delta_time)
 bool music_player_start_main_menu_music(void)
 {
     g_player_initialized = true;
+    g_suspended = false;
     g_current_mode = MUSIC_MODE_MENU;
     g_target_mode = MUSIC_MODE_MENU;
     g_fading_out = false;
@@ -621,6 +623,12 @@ void music_player_update(bool in_world, float delta_time)
         {
             return;
         }
+    }
+
+    if (g_suspended)
+    {
+        set_music_volume(0);
+        return;
     }
 
     const MusicMode desired_mode = in_world ? MUSIC_MODE_WORLD : MUSIC_MODE_MENU;
@@ -651,6 +659,15 @@ void music_player_update(bool in_world, float delta_time)
     update_transition(delta_time);
 }
 
+void music_player_set_suspended(bool suspended)
+{
+    g_suspended = suspended;
+    if (g_suspended)
+    {
+        set_music_volume(0);
+    }
+}
+
 void music_player_update_volume(void)
 {
     if (!g_player_initialized || !g_track_open)
@@ -665,6 +682,7 @@ void music_player_shutdown(void)
 {
     close_current_track();
     g_player_initialized = false;
+    g_suspended = false;
     g_fading_out = false;
     g_fading_in = false;
     g_transition_reason = TRANSITION_NONE;
@@ -684,6 +702,11 @@ void music_player_update(bool in_world, float delta_time)
 {
     (void)in_world;
     (void)delta_time;
+}
+
+void music_player_set_suspended(bool suspended)
+{
+    (void)suspended;
 }
 
 void music_player_update_volume(void)
