@@ -1040,6 +1040,12 @@ void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
         return;
     }
 
+    if (ui->screen == UI_SCREEN_CREATIVE_INVENTORY && back_pressed)
+    {
+        ui_show_screen(ui, UI_SCREEN_WORLD, announce);
+        return;
+    }
+
     const UiScreenDefinition *screen = ui_get_screen_definition(ui->screen);
     if (screen == NULL)
     {
@@ -1248,6 +1254,13 @@ void ui_show_screen(UiState *ui, UiScreen screen, UiAnnounceFn announce)
 
     if (screen == UI_SCREEN_WORLD)
     {
+        if (ui->screen == UI_SCREEN_CREATIVE_INVENTORY)
+        {
+            ui->screen = UI_SCREEN_WORLD;
+            ui_reset_focus(ui);
+            return;
+        }
+
         if (ui->screen_stack_count < (int)(sizeof(ui->screen_stack) / sizeof(ui->screen_stack[0])))
         {
             ui->screen_stack[ui->screen_stack_count] = ui->screen;
