@@ -12,29 +12,20 @@ static const TileId g_biome_lake_tiles[] = {
     TILE_LAKEWATER,
     TILE_PONDWATER,
     TILE_SHALLOWWATER,
-    TILE_WATEREDGE,
-    TILE_WETSOIL,
-    TILE_CLAY};
+    TILE_WATEREDGE};
 
 static const TileId g_biome_plains_tiles[] = {
     TILE_GRASS,
     TILE_TALLGRASS,
     TILE_DIRT,
-    TILE_PACKEDDIRT,
-    TILE_FLOWERPATCH,
-    TILE_BUSH};
+    TILE_PACKEDDIRT};
 
 static const TileId g_biome_forest_tiles[] = {
     TILE_FORESTFLOOR,
     TILE_MOSS,
     TILE_GRASS,
-    TILE_TREEOAK,
-    TILE_TREEPINE,
-    TILE_TREEBIRCH,
-    TILE_TREESAPLING,
-    TILE_BUSH,
-    TILE_BERRYBUSH,
-    TILE_MUSHROOMPATCH};
+    TILE_DIRT,
+    TILE_WETSOIL};
 
 static const TileId g_biome_swamp_tiles[] = {
     TILE_SWAMPWATER,
@@ -42,25 +33,18 @@ static const TileId g_biome_swamp_tiles[] = {
     TILE_SHALLOWWATER,
     TILE_MUD,
     TILE_WETSOIL,
-    TILE_FLOODEDGROUND,
-    TILE_TREEDEAD,
-    TILE_VINES,
-    TILE_VINEPATCH};
+    TILE_FLOODEDGROUND};
 
 static const TileId g_biome_desert_tiles[] = {
     TILE_DESERTSAND,
     TILE_SAND,
     TILE_DRYGRASS,
-    TILE_CACTUS,
-    TILE_DESERT_SHRUB,
     TILE_GRAVEL};
 
 static const TileId g_biome_dry_plains_steppe_tiles[] = {
     TILE_DRYGRASS,
     TILE_PACKEDDIRT,
     TILE_DIRT,
-    TILE_TALLWEEDS,
-    TILE_DESERT_SHRUB,
     TILE_GRAVEL};
 
 static const TileId g_biome_hills_tiles[] = {
@@ -68,25 +52,19 @@ static const TileId g_biome_hills_tiles[] = {
     TILE_DIRT,
     TILE_GRAVEL,
     TILE_LIMESTONE,
-    TILE_ROCKCLUSTER,
-    TILE_BOULDER};
+    TILE_GRANITE};
 
 static const TileId g_biome_mountains_tiles[] = {
     TILE_GRANITE,
     TILE_BASALT,
     TILE_LIMESTONE,
-    TILE_GRAVEL,
-    TILE_ROCKCLUSTER,
-    TILE_LARGEROCK,
-    TILE_BOULDER,
-    TILE_CAVEENTRANCE};
+    TILE_GRAVEL};
 
 static const TileId g_biome_tundra_tiles[] = {
     TILE_FROZENGROUND,
     TILE_PERMAFROST,
     TILE_SNOW,
     TILE_ICE,
-    TILE_TREEDEAD,
     TILE_GRAVEL};
 
 static const TileId g_biome_snowy_mountains_tiles[] = {
@@ -94,26 +72,21 @@ static const TileId g_biome_snowy_mountains_tiles[] = {
     TILE_ICE,
     TILE_PERMAFROST,
     TILE_GRANITE,
-    TILE_BASALT,
-    TILE_LARGEROCK,
-    TILE_BOULDER};
+    TILE_BASALT};
 
 static const TileId g_biome_coast_tiles[] = {
     TILE_SAND,
     TILE_SHALLOWWATER,
     TILE_WATEREDGE,
     TILE_GRAVEL,
-    TILE_CLAY,
-    TILE_WETSOIL};
+    TILE_OCEANWATER};
 
 static const TileId g_biome_river_tiles[] = {
     TILE_RIVERWATER,
     TILE_STREAMWATER,
     TILE_WATERCURRENT,
     TILE_WATEREDGE,
-    TILE_SHALLOWWATER,
-    TILE_MUD,
-    TILE_WETSOIL};
+    TILE_SHALLOWWATER};
 
 static const BiomeDefinition g_biome_definitions[BIOME_TYPE_COUNT] = {
     {BIOME_OCEAN, "Ocean", "Deep water and coastlines.", -2.0f, 30.0f,

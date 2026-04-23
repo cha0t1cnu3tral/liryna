@@ -111,6 +111,8 @@ static bool g_active = false;
 static int g_current_beat_index = -1;
 static float g_time_to_next_beat = 0.0f;
 static void apply_beat_audio(const OpeningSceneBeat *beat);
+static bool beat_has_text(const OpeningSceneBeat *beat);
+static void advance_scene(OpeningSceneAnnounceFn announce, bool skip_silent_beats);
 
 static bool send_mci_command(const char *command)
 {
@@ -137,7 +139,15 @@ static bool try_path(char *out_path, size_t out_size, const char *candidate)
         return false;
     }
 
-    if (SDL_strlcpy(out_path, candidate, out_size) >= out_size)
+    char normalized[1024];
+    const char *full_path = _fullpath(normalized, candidate, sizeof(normalized));
+    const char *path_to_test = candidate;
+    if (full_path != NULL)
+    {
+        path_to_test = normalized;
+    }
+
+    if (SDL_strlcpy(out_path, path_to_test, out_size) >= out_size)
     {
         return false;
     }
@@ -164,36 +174,60 @@ static bool resolve_track_path(const char *relative_path, char *out_path, size_t
         return true;
     }
 
+    const char *dot = strrchr(relative_path, '.');
+    if (dot != NULL)
+    {
+        char alternate_relative_path[1024];
+        if (SDL_strcasecmp(dot, ".wav") == 0)
+        {
+            SDL_snprintf(alternate_relative_path, sizeof(alternate_relative_path), "%.*s.mp3",
+                         (int)(dot - relative_path), relative_path);
+            if (try_path(out_path, out_size, alternate_relative_path))
+            {
+                return true;
+            }
+
+            SDL_snprintf(alternate_relative_path, sizeof(alternate_relative_path), "%.*s.mp3.mp3",
+                         (int)(dot - relative_path), relative_path);
+            if (try_path(out_path, out_size, alternate_relative_path))
+            {
+                return true;
+            }
+        }
+        else if (SDL_strcasecmp(dot, ".mp3") == 0)
+        {
+            SDL_snprintf(alternate_relative_path, sizeof(alternate_relative_path), "%.*s.wav",
+                         (int)(dot - relative_path), relative_path);
+            if (try_path(out_path, out_size, alternate_relative_path))
+            {
+                return true;
+            }
+        }
+    }
+
     const char *base_path = SDL_GetBasePath();
     if (base_path == NULL)
     {
         return false;
     }
 
+    static const char *k_prefixes[] = {
+        "",
+        "..\\",
+        "..\\..\\",
+        "..\\..\\..\\",
+    };
     char candidate[1024];
     bool found = false;
 
-    SDL_snprintf(candidate, sizeof(candidate), "%s%s", base_path, relative_path);
-    if (try_path(out_path, out_size, candidate))
+    for (size_t i = 0; i < sizeof(k_prefixes) / sizeof(k_prefixes[0]); i++)
     {
-        found = true;
-    }
-
-    if (!found)
-    {
-        SDL_snprintf(candidate, sizeof(candidate), "%s..\\%s", base_path, relative_path);
+        SDL_snprintf(candidate, sizeof(candidate), "%s%s%s", base_path, k_prefixes[i],
+                     relative_path);
         if (try_path(out_path, out_size, candidate))
         {
             found = true;
-        }
-    }
-
-    if (!found)
-    {
-        SDL_snprintf(candidate, sizeof(candidate), "%s..\\..\\%s", base_path, relative_path);
-        if (try_path(out_path, out_size, candidate))
-        {
-            found = true;
+            break;
         }
     }
 
@@ -221,11 +255,21 @@ static bool open_track(OpeningSceneTrack *track)
     }
 
     char command[1400];
-    SDL_snprintf(command, sizeof(command), "open \"%s\" type mpegvideo alias %s", track_path,
+    SDL_snprintf(command, sizeof(command), "open \"%s\" type waveaudio alias %s", track_path,
                  track->alias);
     if (!send_mci_command(command))
     {
-        return false;
+        SDL_snprintf(command, sizeof(command), "open \"%s\" type mpegvideo alias %s", track_path,
+                     track->alias);
+        if (!send_mci_command(command))
+        {
+            SDL_snprintf(command, sizeof(command), "open \"%s\" alias %s", track_path,
+                         track->alias);
+            if (!send_mci_command(command))
+            {
+                return false;
+            }
+        }
     }
 
     SDL_snprintf(command, sizeof(command), "set %s time format milliseconds", track->alias);
@@ -319,22 +363,33 @@ static float beat_duration_seconds(const OpeningSceneBeat *beat)
     return SDL_clamp(estimated, 3.0f, 9.0f);
 }
 
-static void advance_scene(OpeningSceneAnnounceFn announce)
+static bool beat_has_text(const OpeningSceneBeat *beat)
 {
-    g_current_beat_index++;
-    if (g_current_beat_index < 0 || (size_t)g_current_beat_index >= k_beat_count)
-    {
-        finish_scene(announce);
-        return;
-    }
+    return beat != NULL && beat->text != NULL && beat->text[0] != '\0';
+}
 
-    const OpeningSceneBeat *beat = &g_beats[g_current_beat_index];
-    apply_beat_audio(beat);
-    g_time_to_next_beat = beat_duration_seconds(beat);
-
-    if (announce != NULL && beat->text != NULL && beat->text[0] != '\0')
+static void advance_scene(OpeningSceneAnnounceFn announce, bool skip_silent_beats)
+{
+    bool keep_advancing = true;
+    while (keep_advancing)
     {
-        announce(beat->text, true);
+        g_current_beat_index++;
+        if (g_current_beat_index < 0 || (size_t)g_current_beat_index >= k_beat_count)
+        {
+            finish_scene(announce);
+            return;
+        }
+
+        const OpeningSceneBeat *beat = &g_beats[g_current_beat_index];
+        apply_beat_audio(beat);
+        g_time_to_next_beat = beat_duration_seconds(beat);
+
+        if (announce != NULL && beat_has_text(beat))
+        {
+            announce(beat->text, true);
+        }
+
+        keep_advancing = skip_silent_beats && !beat_has_text(beat);
     }
 }
 
@@ -410,7 +465,7 @@ void opening_scene_start(OpeningSceneAnnounceFn announce)
         announce("Opening scene. Press Enter to skip ahead.", true);
     }
 
-    advance_scene(announce);
+    advance_scene(announce, false);
 }
 
 void opening_scene_update(float delta_time, bool enter_pressed, OpeningSceneAnnounceFn announce)
@@ -422,15 +477,22 @@ void opening_scene_update(float delta_time, bool enter_pressed, OpeningSceneAnno
 
     if (enter_pressed)
     {
-        advance_scene(announce);
+        advance_scene(announce, true);
         return;
     }
 
-    const float safe_delta = delta_time > 0.0f ? delta_time : 0.0f;
-    g_time_to_next_beat -= safe_delta;
-    if (g_time_to_next_beat <= 0.0f)
+    float remaining_time = delta_time > 0.0f ? delta_time : 0.0f;
+    while (g_active && remaining_time > 0.0f)
     {
-        advance_scene(announce);
+        if (g_time_to_next_beat > remaining_time)
+        {
+            g_time_to_next_beat -= remaining_time;
+            remaining_time = 0.0f;
+            continue;
+        }
+
+        remaining_time -= SDL_max(g_time_to_next_beat, 0.0f);
+        advance_scene(announce, false);
     }
 }
 

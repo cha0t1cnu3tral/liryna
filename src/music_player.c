@@ -53,6 +53,7 @@ static TransitionReason g_transition_reason = TRANSITION_NONE;
 
 static int g_current_base_volume = 0;
 static int g_current_effective_volume = -1;
+static bool g_volume_control_supported = true;
 
 static bool file_exists(const char *path)
 {
@@ -85,12 +86,20 @@ static bool try_path(char *out_path, size_t out_size, const char *candidate)
         return false;
     }
 
-    if (!file_exists(candidate))
+    char normalized[1024];
+    const char *full_path = _fullpath(normalized, candidate, sizeof(normalized));
+    const char *path_to_test = candidate;
+    if (full_path != NULL)
+    {
+        path_to_test = normalized;
+    }
+
+    if (!file_exists(path_to_test))
     {
         return false;
     }
 
-    SDL_strlcpy(out_path, candidate, out_size);
+    SDL_strlcpy(out_path, path_to_test, out_size);
     return true;
 }
 
@@ -101,12 +110,16 @@ static bool try_directory(char *out_path, size_t out_size, const char *candidate
         return false;
     }
 
-    if (!directory_exists(candidate))
+    char normalized[1024];
+    const char *full_path = _fullpath(normalized, candidate, sizeof(normalized));
+    const char *path_to_test = full_path != NULL ? normalized : candidate;
+
+    if (!directory_exists(path_to_test))
     {
         return false;
     }
 
-    SDL_strlcpy(out_path, candidate, out_size);
+    SDL_strlcpy(out_path, path_to_test, out_size);
     return true;
 }
 
@@ -122,32 +135,59 @@ static bool resolve_music_path(char *out_path, size_t out_size, const char *rela
         return true;
     }
 
+    const char *dot = strrchr(relative_path, '.');
+    if (dot != NULL)
+    {
+        char alternate_relative_path[1024];
+        if (SDL_strcasecmp(dot, ".wav") == 0)
+        {
+            SDL_snprintf(alternate_relative_path, sizeof(alternate_relative_path), "%.*s.mp3",
+                         (int)(dot - relative_path), relative_path);
+            if (try_path(out_path, out_size, alternate_relative_path))
+            {
+                return true;
+            }
+
+            SDL_snprintf(alternate_relative_path, sizeof(alternate_relative_path), "%.*s.mp3.mp3",
+                         (int)(dot - relative_path), relative_path);
+            if (try_path(out_path, out_size, alternate_relative_path))
+            {
+                return true;
+            }
+        }
+        else if (SDL_strcasecmp(dot, ".mp3") == 0)
+        {
+            SDL_snprintf(alternate_relative_path, sizeof(alternate_relative_path), "%.*s.wav",
+                         (int)(dot - relative_path), relative_path);
+            if (try_path(out_path, out_size, alternate_relative_path))
+            {
+                return true;
+            }
+        }
+    }
+
     const char *base_path = SDL_GetBasePath();
     if (base_path == NULL)
     {
         return false;
     }
 
+    static const char *k_prefixes[] = {
+        "",
+        "..\\",
+        "..\\..\\",
+        "..\\..\\..\\",
+    };
     char candidate[1024];
-    SDL_snprintf(candidate, sizeof(candidate), "%s%s", base_path, relative_path);
-    if (try_path(out_path, out_size, candidate))
+    for (size_t i = 0; i < sizeof(k_prefixes) / sizeof(k_prefixes[0]); i++)
     {
-        SDL_free((void *)base_path);
-        return true;
-    }
-
-    SDL_snprintf(candidate, sizeof(candidate), "%s..\\%s", base_path, relative_path);
-    if (try_path(out_path, out_size, candidate))
-    {
-        SDL_free((void *)base_path);
-        return true;
-    }
-
-    SDL_snprintf(candidate, sizeof(candidate), "%s..\\..\\%s", base_path, relative_path);
-    if (try_path(out_path, out_size, candidate))
-    {
-        SDL_free((void *)base_path);
-        return true;
+        SDL_snprintf(candidate, sizeof(candidate), "%s%s%s", base_path, k_prefixes[i],
+                     relative_path);
+        if (try_path(out_path, out_size, candidate))
+        {
+            SDL_free((void *)base_path);
+            return true;
+        }
     }
 
     SDL_free((void *)base_path);
@@ -173,26 +213,22 @@ static bool resolve_music_directory(char *out_path, size_t out_size)
         return false;
     }
 
+    static const char *k_prefixes[] = {
+        "",
+        "..\\",
+        "..\\..\\",
+        "..\\..\\..\\",
+    };
     char candidate[1024];
-    SDL_snprintf(candidate, sizeof(candidate), "%s%s", base_path, k_music_relative_directory);
-    if (try_directory(out_path, out_size, candidate))
+    for (size_t i = 0; i < sizeof(k_prefixes) / sizeof(k_prefixes[0]); i++)
     {
-        SDL_free((void *)base_path);
-        return true;
-    }
-
-    SDL_snprintf(candidate, sizeof(candidate), "%s..\\%s", base_path, k_music_relative_directory);
-    if (try_directory(out_path, out_size, candidate))
-    {
-        SDL_free((void *)base_path);
-        return true;
-    }
-
-    SDL_snprintf(candidate, sizeof(candidate), "%s..\\..\\%s", base_path, k_music_relative_directory);
-    if (try_directory(out_path, out_size, candidate))
-    {
-        SDL_free((void *)base_path);
-        return true;
+        SDL_snprintf(candidate, sizeof(candidate), "%s%s%s", base_path, k_prefixes[i],
+                     k_music_relative_directory);
+        if (try_directory(out_path, out_size, candidate))
+        {
+            SDL_free((void *)base_path);
+            return true;
+        }
     }
 
     SDL_free((void *)base_path);
@@ -290,10 +326,9 @@ static bool load_world_tracks(void)
         return false;
     }
 
-    char pattern[1200];
-    SDL_snprintf(pattern, sizeof(pattern), "%s\\*.mp3", music_directory);
-
     WIN32_FIND_DATAA find_data;
+    char pattern[1200];
+    SDL_snprintf(pattern, sizeof(pattern), "%s\\*.*", music_directory);
     HANDLE find_handle = FindFirstFileA(pattern, &find_data);
     if (find_handle == INVALID_HANDLE_VALUE)
     {
@@ -308,6 +343,14 @@ static bool load_world_tracks(void)
         }
 
         if (contains_case_insensitive(find_data.cFileName, "mm1"))
+        {
+            continue;
+        }
+
+        const char *extension = strrchr(find_data.cFileName, '.');
+        if (extension == NULL ||
+            (SDL_strcasecmp(extension, ".wav") != 0 &&
+             SDL_strcasecmp(extension, ".mp3") != 0))
         {
             continue;
         }
@@ -364,6 +407,12 @@ static bool set_music_volume(int volume)
     }
 
     const int effective_volume = settings_effective_music_mci_volume(clamped_base_volume);
+    if (!g_volume_control_supported)
+    {
+        g_current_effective_volume = effective_volume;
+        return true;
+    }
+
     if (effective_volume == g_current_effective_volume)
     {
         return true;
@@ -373,7 +422,9 @@ static bool set_music_volume(int volume)
     SDL_snprintf(command, sizeof(command), "setaudio %s volume to %d", k_music_alias, effective_volume);
     if (!send_mci_command(command))
     {
-        return false;
+        g_volume_control_supported = false;
+        g_current_effective_volume = effective_volume;
+        return true;
     }
 
     g_current_effective_volume = effective_volume;
@@ -390,10 +441,20 @@ static bool open_and_play_track(const char *path, bool repeat)
     close_current_track();
 
     char command[1400];
-    SDL_snprintf(command, sizeof(command), "open \"%s\" type mpegvideo alias %s", path, k_music_alias);
+    SDL_snprintf(command, sizeof(command), "open \"%s\" type waveaudio alias %s", path,
+                 k_music_alias);
     if (!send_mci_command(command))
     {
-        return false;
+        SDL_snprintf(command, sizeof(command), "open \"%s\" type mpegvideo alias %s", path,
+                     k_music_alias);
+        if (!send_mci_command(command))
+        {
+            SDL_snprintf(command, sizeof(command), "open \"%s\" alias %s", path, k_music_alias);
+            if (!send_mci_command(command))
+            {
+                return false;
+            }
+        }
     }
 
     g_track_open = true;
@@ -415,8 +476,12 @@ static bool open_and_play_track(const char *path, bool repeat)
     SDL_snprintf(command, sizeof(command), repeat ? "play %s repeat" : "play %s", k_music_alias);
     if (!send_mci_command(command))
     {
-        close_current_track();
-        return false;
+        SDL_snprintf(command, sizeof(command), "play %s", k_music_alias);
+        if (!send_mci_command(command))
+        {
+            close_current_track();
+            return false;
+        }
     }
 
     g_fading_in = true;
@@ -612,6 +677,7 @@ bool music_player_start_main_menu_music(void)
     g_transition_timer = 0.0f;
     g_current_base_volume = k_max_music_volume;
     g_current_effective_volume = -1;
+    g_volume_control_supported = true;
     return start_menu_track();
 }
 
@@ -628,7 +694,6 @@ void music_player_update(bool in_world, float delta_time)
     if (g_suspended)
     {
         set_music_volume(0);
-        return;
     }
 
     const MusicMode desired_mode = in_world ? MUSIC_MODE_WORLD : MUSIC_MODE_MENU;
@@ -651,6 +716,18 @@ void music_player_update(bool in_world, float delta_time)
             }
         }
         else if (!is_track_playing())
+        {
+            begin_transition(TRANSITION_NEXT_WORLD_TRACK, MUSIC_MODE_WORLD);
+        }
+    }
+
+    if (!g_fading_out && !g_fading_in && g_track_open && !is_track_playing())
+    {
+        if (g_current_mode == MUSIC_MODE_MENU)
+        {
+            start_menu_track();
+        }
+        else
         {
             begin_transition(TRANSITION_NEXT_WORLD_TRACK, MUSIC_MODE_WORLD);
         }
@@ -689,6 +766,7 @@ void music_player_shutdown(void)
     g_transition_timer = 0.0f;
     g_current_base_volume = 0;
     g_current_effective_volume = -1;
+    g_volume_control_supported = true;
 }
 
 #else

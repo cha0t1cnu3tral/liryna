@@ -9,6 +9,7 @@ typedef enum UiScreen
     UI_SCREEN_NEW_WORLD,
     UI_SCREEN_WORLD,
     UI_SCREEN_CREATIVE_INVENTORY,
+    UI_SCREEN_SURVIVAL_INVENTORY,
     UI_SCREEN_SAVED_WORLDS,
     UI_SCREEN_SETTINGS,
     UI_SCREEN_HELP,
@@ -22,6 +23,7 @@ typedef enum UiAction
     UI_ACTION_START_WORLD_SURVIVAL,
     UI_ACTION_START_WORLD_CREATIVE,
     UI_ACTION_SELECT_CREATIVE_TILE,
+    UI_ACTION_SELECT_SURVIVAL_TILE,
     UI_ACTION_EXIT,
     UI_ACTION_OPEN_SAVED_WORLDS,
     UI_ACTION_OPEN_SETTINGS,
@@ -51,5 +53,6 @@ void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
 UiScreen ui_screen(const UiState *ui);
 void ui_show_screen(UiState *ui, UiScreen screen, UiAnnounceFn announce);
 const char *ui_focused_widget_label(const UiState *ui);
+int ui_focused_widget_user_data(const UiState *ui);
 
 #endif

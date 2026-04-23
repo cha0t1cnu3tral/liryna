@@ -12,6 +12,7 @@
 #include "tile_categories.h"
 #include "water_biome_audio.h"
 #include "ui/ui.h"
+#include "ui/screens/screen_registry.h"
 #include "world/world.h"
 
 typedef struct Game
@@ -39,6 +40,9 @@ typedef struct Game
     bool prev_tab;
     bool prev_space;
     bool prev_e;
+    bool prev_right_bracket;
+    bool prev_mouse_right;
+    bool prev_hotbar_keys[INVENTORY_HOTBAR_SLOT_COUNT];
 
     bool has_prev_tile;
     int prev_tile_x;
@@ -49,6 +53,8 @@ typedef struct Game
 
     int tracker_category_index;
     int tracker_object_index;
+    int pending_hotbar_tile;
+    int pending_inventory_slot;
 } Game;
 
 static const TileCategory k_tracker_categories[] = {
@@ -64,6 +70,8 @@ static const TileCategory k_tracker_categories[] = {
 
 static const int k_tracker_category_count =
     (int)(sizeof(k_tracker_categories) / sizeof(k_tracker_categories[0]));
+
+static void game_clear_pending_inventory_item(Game *game);
 
 static void game_announce(const char *text, bool interrupt)
 {
@@ -111,6 +119,115 @@ static void game_set_world_tile_if_in_bounds(World *world, int tile_x, int tile_
     world->tiles[(tile_y * world->width) + tile_x] = tile_id;
 }
 
+static bool game_tile_pickup_allowed_without_tools(const TileDefinition *tile)
+{
+    if (tile == NULL)
+    {
+        return false;
+    }
+
+    const TileCategory category = tile_category_for_definition(tile);
+    return category == TILE_CATEGORY_FURNITURE;
+}
+
+static void game_announce_pickup_requirement(const TileDefinition *tile)
+{
+    if (tile == NULL)
+    {
+        game_announce("Nothing to pick up.", true);
+        return;
+    }
+
+    const TileCategory category = tile_category_for_definition(tile);
+    if (category == TILE_CATEGORY_TREES)
+    {
+        game_announce("Trees need tools before pickup. Not implemented yet.", true);
+        return;
+    }
+
+    if (category == TILE_CATEGORY_ROCKS)
+    {
+        game_announce("Rocks need tools before pickup. Not implemented yet.", true);
+        return;
+    }
+
+    if (category == TILE_CATEGORY_TERRAIN)
+    {
+        game_announce("Ground pieces need tools before pickup. Not implemented yet.", true);
+        return;
+    }
+
+    game_announce("This tile cannot be picked up right now.", true);
+}
+
+static bool game_try_pickup_near_player(Game *game)
+{
+    if (game == NULL || !game->world_loaded || game->world.tile_size <= 0)
+    {
+        return false;
+    }
+
+    const int player_tile_x = (int)(game->world.player_x / (float)game->world.tile_size);
+    const int player_tile_y = (int)(game->world.player_y / (float)game->world.tile_size);
+    static const int k_offsets[][2] = {
+        {0, 0},
+        {1, 0},
+        {-1, 0},
+        {0, 1},
+        {0, -1},
+        {1, 1},
+        {-1, 1},
+        {1, -1},
+        {-1, -1},
+    };
+
+    const TileDefinition *first_unavailable_tile = NULL;
+
+    for (int i = 0; i < (int)(sizeof(k_offsets) / sizeof(k_offsets[0])); i++)
+    {
+        const int tile_x = player_tile_x + k_offsets[i][0];
+        const int tile_y = player_tile_y + k_offsets[i][1];
+        const TileDefinition *tile = game_get_tile_at(&game->world, tile_x, tile_y);
+        if (tile == NULL)
+        {
+            continue;
+        }
+
+        if (!game_tile_pickup_allowed_without_tools(tile))
+        {
+            if (first_unavailable_tile == NULL)
+            {
+                first_unavailable_tile = tile;
+            }
+            continue;
+        }
+
+        if (!inventory_add_survival(&game->inventory, tile->id, 1))
+        {
+            game_announce("Inventory full.", true);
+            return false;
+        }
+
+        game_set_world_tile_if_in_bounds(&game->world, tile_x, tile_y, TILE_GRASS);
+        char message[160];
+        snprintf(message, sizeof(message), "Picked up %s.",
+                 tile->name != NULL ? tile->name : "item");
+        game_announce(message, true);
+        return true;
+    }
+
+    if (first_unavailable_tile != NULL)
+    {
+        game_announce_pickup_requirement(first_unavailable_tile);
+    }
+    else
+    {
+        game_announce("No pickup item nearby.", true);
+    }
+
+    return false;
+}
+
 static void game_place_opening_wreckage(Game *game)
 {
     if (game == NULL || !game->world_loaded || game->world.tile_size <= 0)
@@ -121,14 +238,19 @@ static void game_place_opening_wreckage(Game *game)
     const int spawn_x = (int)(game->world.player_x / (float)game->world.tile_size);
     const int spawn_y = (int)(game->world.player_y / (float)game->world.tile_size);
 
+    for (int offset_y = -2; offset_y <= 2; offset_y++)
+    {
+        for (int offset_x = -2; offset_x <= 2; offset_x++)
+        {
+            game_set_world_tile_if_in_bounds(&game->world, spawn_x + offset_x, spawn_y + offset_y,
+                                             TILE_SHIPPIECE);
+        }
+    }
+
     game_set_world_tile_if_in_bounds(&game->world, spawn_x + 1, spawn_y, TILE_SMALLAXE);
     game_set_world_tile_if_in_bounds(&game->world, spawn_x + 2, spawn_y, TILE_PICKAXE);
     game_set_world_tile_if_in_bounds(&game->world, spawn_x + 1, spawn_y + 1, TILE_READER);
     game_set_world_tile_if_in_bounds(&game->world, spawn_x, spawn_y + 1, TILE_RADIO);
-
-    game_set_world_tile_if_in_bounds(&game->world, spawn_x - 1, spawn_y - 1, TILE_SHIPPIECE);
-    game_set_world_tile_if_in_bounds(&game->world, spawn_x - 2, spawn_y - 1, TILE_SHIPPIECE);
-    game_set_world_tile_if_in_bounds(&game->world, spawn_x - 1, spawn_y - 2, TILE_SHIPPIECE);
 }
 
 static void game_announce_blocked_feature_ahead(Game *game, int move_dir_x, int move_dir_y)
@@ -335,6 +457,183 @@ static void game_announce_tracker_coordinates(Game *game, bool interrupt)
     game_announce(message, interrupt);
 }
 
+static int game_find_survival_slot_for_tile(const Inventory *inventory, TileId tile_id)
+{
+    if (inventory == NULL || inventory->mode != GAME_MODE_SURVIVAL ||
+        tile_id < 0 || tile_id >= TILE_ID_COUNT)
+    {
+        return -1;
+    }
+
+    for (int slot_index = 0; slot_index < INVENTORY_SURVIVAL_SLOT_COUNT; slot_index++)
+    {
+        const InventorySlot *slot = &inventory->slots[slot_index];
+        if (slot->occupied && slot->tile_id == tile_id)
+        {
+            return slot_index;
+        }
+    }
+
+    return -1;
+}
+
+static void game_handle_survival_inventory_selection_slot(Game *game, int selected_slot)
+{
+    if (game == NULL || selected_slot < 0 || selected_slot >= INVENTORY_SURVIVAL_SLOT_COUNT)
+    {
+        return;
+    }
+
+    InventorySlot *slot = &game->inventory.slots[selected_slot];
+    if (!slot->occupied || slot->tile_id < 0 || slot->tile_id >= TILE_ID_COUNT)
+    {
+        return;
+    }
+
+    const TileId selected_tile = (TileId)slot->tile_id;
+    game->inventory.selected_tile = selected_tile;
+    game->pending_hotbar_tile = selected_tile;
+
+    if (game->pending_inventory_slot < 0)
+    {
+        game->pending_inventory_slot = selected_slot;
+        const TileDefinition *tile = tiles_get_definition(selected_tile);
+        char message[256];
+        snprintf(message, sizeof(message),
+                 "%s selected. Enter on another item to swap, or press 1 through 9 for hotbar.",
+                 tile != NULL && tile->name != NULL ? tile->name : "Item");
+        game_announce(message, true);
+        return;
+    }
+
+    if (game->pending_inventory_slot == selected_slot)
+    {
+        game_clear_pending_inventory_item(game);
+        game_announce("Selection cancelled.", true);
+        return;
+    }
+
+    InventorySlot temp = game->inventory.slots[game->pending_inventory_slot];
+    game->inventory.slots[game->pending_inventory_slot] = game->inventory.slots[selected_slot];
+    game->inventory.slots[selected_slot] = temp;
+
+    game->pending_inventory_slot = -1;
+    game->pending_hotbar_tile = TILE_ID_COUNT;
+    game_announce("Items swapped.", true);
+}
+
+static void game_clear_pending_inventory_item(Game *game)
+{
+    if (game == NULL)
+    {
+        return;
+    }
+
+    game->pending_inventory_slot = -1;
+    game->pending_hotbar_tile = TILE_ID_COUNT;
+}
+
+static void game_handle_survival_inventory_selection(Game *game, TileId selected_tile)
+{
+    if (game == NULL || selected_tile < 0 || selected_tile >= TILE_ID_COUNT)
+    {
+        return;
+    }
+
+    const int selected_slot = game_find_survival_slot_for_tile(&game->inventory, selected_tile);
+    if (selected_slot < 0)
+    {
+        return;
+    }
+
+    game->inventory.selected_tile = selected_tile;
+    game->pending_hotbar_tile = selected_tile;
+
+    if (game->pending_inventory_slot < 0)
+    {
+        game->pending_inventory_slot = selected_slot;
+        const TileDefinition *tile = tiles_get_definition(selected_tile);
+        char message[256];
+        snprintf(message, sizeof(message),
+                 "%s selected. Enter on another item to swap, or press 1 through 9 for hotbar.",
+                 tile != NULL && tile->name != NULL ? tile->name : "Item");
+        game_announce(message, true);
+        return;
+    }
+
+    if (game->pending_inventory_slot == selected_slot)
+    {
+        game_clear_pending_inventory_item(game);
+        game_announce("Selection cancelled.", true);
+        return;
+    }
+
+    InventorySlot temp = game->inventory.slots[game->pending_inventory_slot];
+    game->inventory.slots[game->pending_inventory_slot] = game->inventory.slots[selected_slot];
+    game->inventory.slots[selected_slot] = temp;
+
+    game->pending_inventory_slot = -1;
+    game->pending_hotbar_tile = TILE_ID_COUNT;
+    game_announce("Items swapped.", true);
+}
+
+static void game_assign_pending_hotbar_tile(Game *game, int slot_index)
+{
+    if (game == NULL ||
+        slot_index < 0 || slot_index >= INVENTORY_HOTBAR_SLOT_COUNT ||
+        game->pending_hotbar_tile < 0 || game->pending_hotbar_tile >= TILE_ID_COUNT)
+    {
+        return;
+    }
+
+    if (!inventory_assign_hotbar_slot(&game->inventory, slot_index, game->pending_hotbar_tile))
+    {
+        return;
+    }
+
+    const TileDefinition *tile = tiles_get_definition((TileId)game->pending_hotbar_tile);
+    char message[192];
+    snprintf(message, sizeof(message), "%s assigned to hotbar slot %d.",
+             tile != NULL && tile->name != NULL ? tile->name : "Item",
+             slot_index + 1);
+    game_announce(message, true);
+    game->pending_hotbar_tile = TILE_ID_COUNT;
+    game->pending_inventory_slot = -1;
+}
+
+static void game_select_hotbar_slot(Game *game, int slot_index, bool announce_if_empty)
+{
+    if (game == NULL ||
+        slot_index < 0 || slot_index >= INVENTORY_HOTBAR_SLOT_COUNT)
+    {
+        return;
+    }
+
+    if (!inventory_select_hotbar_slot(&game->inventory, slot_index))
+    {
+        return;
+    }
+
+    const int tile_id = inventory_hotbar_tile(&game->inventory, slot_index);
+    if (tile_id < 0 || tile_id >= TILE_ID_COUNT)
+    {
+        if (announce_if_empty)
+        {
+            char message[128];
+            snprintf(message, sizeof(message), "Hotbar slot %d is empty.", slot_index + 1);
+            game_announce(message, true);
+        }
+        return;
+    }
+
+    const TileDefinition *tile = tiles_get_definition((TileId)tile_id);
+    char message[192];
+    snprintf(message, sizeof(message), "%s, hotbar slot %d selected.",
+             tile != NULL && tile->name != NULL ? tile->name : "Unknown",
+             slot_index + 1);
+    game_announce(message, true);
+}
+
 static bool game_create_new_world(Game *game, GameMode mode)
 {
     enum
@@ -371,6 +670,8 @@ static bool game_create_new_world(Game *game, GameMode mode)
     game->has_prev_tile = false;
     game->tracker_category_index = 0;
     game->tracker_object_index = 0;
+    game->pending_hotbar_tile = TILE_ID_COUNT;
+    game->pending_inventory_slot = -1;
     game->has_prev_blocked_tile = false;
     game->prev_blocked_tile_x = -1;
     game->prev_blocked_tile_y = -1;
@@ -402,6 +703,12 @@ static void game_init(Engine *engine, void *userdata)
     game->prev_tab = false;
     game->prev_space = false;
     game->prev_e = false;
+    game->prev_right_bracket = false;
+    game->prev_mouse_right = false;
+    for (int i = 0; i < INVENTORY_HOTBAR_SLOT_COUNT; i++)
+    {
+        game->prev_hotbar_keys[i] = false;
+    }
     game->has_prev_tile = false;
     game->prev_tile_x = -1;
     game->prev_tile_y = -1;
@@ -410,6 +717,8 @@ static void game_init(Engine *engine, void *userdata)
     game->prev_blocked_tile_y = -1;
     game->tracker_category_index = 0;
     game->tracker_object_index = 0;
+    game->pending_hotbar_tile = TILE_ID_COUNT;
+    game->pending_inventory_slot = -1;
     game->game_mode = GAME_MODE_SURVIVAL;
     inventory_init(&game->inventory, GAME_MODE_SURVIVAL);
 
@@ -463,6 +772,25 @@ static void game_update(Engine *engine, void *userdata)
     const bool tab_now = engine_key_down(engine, SDL_SCANCODE_TAB);
     const bool space_now = engine_key_down(engine, SDL_SCANCODE_SPACE);
     const bool e_now = engine_key_down(engine, SDL_SCANCODE_E);
+    const bool right_bracket_now = engine_key_down(engine, SDL_SCANCODE_RIGHTBRACKET);
+    bool hotbar_keys_now[INVENTORY_HOTBAR_SLOT_COUNT] = {
+        engine_key_down(engine, SDL_SCANCODE_1),
+        engine_key_down(engine, SDL_SCANCODE_2),
+        engine_key_down(engine, SDL_SCANCODE_3),
+        engine_key_down(engine, SDL_SCANCODE_4),
+        engine_key_down(engine, SDL_SCANCODE_5),
+        engine_key_down(engine, SDL_SCANCODE_6),
+        engine_key_down(engine, SDL_SCANCODE_7),
+        engine_key_down(engine, SDL_SCANCODE_8),
+        engine_key_down(engine, SDL_SCANCODE_9),
+    };
+    float mouse_x = 0.0f;
+    float mouse_y = 0.0f;
+    const SDL_MouseButtonFlags mouse_buttons = SDL_GetMouseState(&mouse_x, &mouse_y);
+    (void)mouse_x;
+    (void)mouse_y;
+    const bool mouse_right_now =
+        (mouse_buttons & SDL_BUTTON_MASK(SDL_BUTTON_RIGHT)) != 0;
     const bool shift_now = engine_key_down(engine, SDL_SCANCODE_LSHIFT) ||
                            engine_key_down(engine, SDL_SCANCODE_RSHIFT);
     const bool ctrl_now = engine_key_down(engine, SDL_SCANCODE_LCTRL) ||
@@ -486,8 +814,20 @@ static void game_update(Engine *engine, void *userdata)
     const bool tab_pressed = tab_now && !game->prev_tab;
     const bool space_pressed = space_now && !game->prev_space;
     const bool e_pressed = e_now && !game->prev_e;
+    const bool right_bracket_pressed =
+        right_bracket_now && !game->prev_right_bracket;
+    const bool mouse_right_pressed = mouse_right_now && !game->prev_mouse_right;
     const bool next_container_pressed = tab_pressed && !shift_now;
     const bool previous_container_pressed = tab_pressed && shift_now;
+    int pressed_hotbar_index = -1;
+    for (int i = 0; i < INVENTORY_HOTBAR_SLOT_COUNT; i++)
+    {
+        if (hotbar_keys_now[i] && !game->prev_hotbar_keys[i])
+        {
+            pressed_hotbar_index = i;
+            break;
+        }
+    }
 
     game->prev_up = up_now;
     game->prev_down = down_now;
@@ -505,8 +845,15 @@ static void game_update(Engine *engine, void *userdata)
     game->prev_tab = tab_now;
     game->prev_space = space_now;
     game->prev_e = e_now;
+    game->prev_right_bracket = right_bracket_now;
+    game->prev_mouse_right = mouse_right_now;
+    for (int i = 0; i < INVENTORY_HOTBAR_SLOT_COUNT; i++)
+    {
+        game->prev_hotbar_keys[i] = hotbar_keys_now[i];
+    }
 
     UiAction action = UI_ACTION_NONE;
+    ui_survival_inventory_set_inventory(&game->inventory);
     ui_update(&game->ui, up_pressed, down_pressed, left_pressed, right_pressed,
               next_container_pressed, previous_container_pressed, enter_pressed,
               back_pressed, backspace_pressed, engine_text_input(engine), &action,
@@ -542,19 +889,41 @@ static void game_update(Engine *engine, void *userdata)
         }
     }
 
-    if (action == UI_ACTION_SELECT_CREATIVE_TILE)
+    if (action == UI_ACTION_SELECT_CREATIVE_TILE ||
+        action == UI_ACTION_SELECT_SURVIVAL_TILE)
     {
         const char *label = ui_focused_widget_label(&game->ui);
         const TileId selected_tile = tiles_find_by_name(label);
         if (selected_tile != TILE_ID_COUNT)
         {
-            game->inventory.selected_tile = selected_tile;
-            char message[192];
-            snprintf(message, sizeof(message), "%s selected.",
-                     label != NULL ? label : "Tile");
-            game_announce(message, true);
-            ui_show_screen(&game->ui, UI_SCREEN_WORLD,
-                           game->speech_ready ? game_announce : NULL);
+            if (action == UI_ACTION_SELECT_SURVIVAL_TILE)
+            {
+                const int focused_slot = ui_focused_widget_user_data(&game->ui);
+                if (focused_slot >= 0)
+                {
+                    game_handle_survival_inventory_selection_slot(game, focused_slot);
+                }
+                else
+                {
+                    game_handle_survival_inventory_selection(game, selected_tile);
+                }
+            }
+            else
+            {
+                game->inventory.selected_tile = selected_tile;
+                game->pending_hotbar_tile = selected_tile;
+                game->pending_inventory_slot = -1;
+                char message[256];
+                snprintf(message, sizeof(message),
+                         "%s selected. Press 1 through 9 to assign hotbar.",
+                         label != NULL ? label : "Tile");
+                game_announce(message, true);
+            }
+        }
+        else if (action == UI_ACTION_SELECT_SURVIVAL_TILE)
+        {
+            game_clear_pending_inventory_item(game);
+            game_announce("Selection cancelled.", true);
         }
     }
 
@@ -570,14 +939,46 @@ static void game_update(Engine *engine, void *userdata)
             }
             else
             {
-                game_announce("Inventory is only available in creative right now.", true);
+                ui_show_screen(&game->ui, UI_SCREEN_SURVIVAL_INVENTORY,
+                               game->speech_ready ? game_announce : NULL);
             }
         }
-        else if (screen == UI_SCREEN_CREATIVE_INVENTORY)
+        else if (screen == UI_SCREEN_CREATIVE_INVENTORY ||
+                 screen == UI_SCREEN_SURVIVAL_INVENTORY)
         {
             ui_show_screen(&game->ui, UI_SCREEN_WORLD,
                            game->speech_ready ? game_announce : NULL);
+            game_clear_pending_inventory_item(game);
         }
+    }
+
+    const UiScreen current_screen = ui_screen(&game->ui);
+    const bool in_inventory_screen =
+        current_screen == UI_SCREEN_CREATIVE_INVENTORY ||
+        current_screen == UI_SCREEN_SURVIVAL_INVENTORY;
+    if (!in_inventory_screen && game->pending_inventory_slot >= 0)
+    {
+        game_clear_pending_inventory_item(game);
+    }
+
+    if (pressed_hotbar_index >= 0)
+    {
+        if (in_inventory_screen && game->pending_hotbar_tile >= 0 &&
+            game->pending_hotbar_tile < TILE_ID_COUNT)
+        {
+            game_assign_pending_hotbar_tile(game, pressed_hotbar_index);
+        }
+        else if (current_screen == UI_SCREEN_WORLD && game->world_loaded)
+        {
+            game_select_hotbar_slot(game, pressed_hotbar_index, true);
+        }
+    }
+
+    if ((right_bracket_pressed || mouse_right_pressed) &&
+        current_screen == UI_SCREEN_WORLD && game->world_loaded &&
+        game->game_mode == GAME_MODE_SURVIVAL && !opening_scene_is_active())
+    {
+        game_try_pickup_near_player(game);
     }
 
     const bool in_world_screen = ui_screen(&game->ui) == UI_SCREEN_WORLD && game->world_loaded;

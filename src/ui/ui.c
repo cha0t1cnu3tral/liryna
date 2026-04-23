@@ -44,6 +44,7 @@ static bool ui_is_external_action(UiAction action)
     return action == UI_ACTION_START_WORLD_SURVIVAL ||
            action == UI_ACTION_START_WORLD_CREATIVE ||
            action == UI_ACTION_SELECT_CREATIVE_TILE ||
+           action == UI_ACTION_SELECT_SURVIVAL_TILE ||
            action == UI_ACTION_EXIT;
 }
 
@@ -989,6 +990,7 @@ static bool ui_handle_internal_action(UiState *ui, UiAction selected_action,
     case UI_ACTION_START_WORLD_SURVIVAL:
     case UI_ACTION_START_WORLD_CREATIVE:
     case UI_ACTION_SELECT_CREATIVE_TILE:
+    case UI_ACTION_SELECT_SURVIVAL_TILE:
     case UI_ACTION_EXIT:
     default:
         return false;
@@ -1040,7 +1042,9 @@ void ui_update(UiState *ui, bool up_pressed, bool down_pressed,
         return;
     }
 
-    if (ui->screen == UI_SCREEN_CREATIVE_INVENTORY && back_pressed)
+    if ((ui->screen == UI_SCREEN_CREATIVE_INVENTORY ||
+         ui->screen == UI_SCREEN_SURVIVAL_INVENTORY) &&
+        back_pressed)
     {
         ui_show_screen(ui, UI_SCREEN_WORLD, announce);
         return;
@@ -1261,6 +1265,13 @@ void ui_show_screen(UiState *ui, UiScreen screen, UiAnnounceFn announce)
             return;
         }
 
+        if (ui->screen == UI_SCREEN_SURVIVAL_INVENTORY)
+        {
+            ui->screen = UI_SCREEN_WORLD;
+            ui_reset_focus(ui);
+            return;
+        }
+
         if (ui->screen_stack_count < (int)(sizeof(ui->screen_stack) / sizeof(ui->screen_stack[0])))
         {
             ui->screen_stack[ui->screen_stack_count] = ui->screen;
@@ -1294,4 +1305,26 @@ const char *ui_focused_widget_label(const UiState *ui)
     }
 
     return widget->label;
+}
+
+int ui_focused_widget_user_data(const UiState *ui)
+{
+    if (!ui_is_valid(ui))
+    {
+        return -1;
+    }
+
+    const UiScreenDefinition *screen = ui_get_screen_definition(ui->screen);
+    if (screen == NULL)
+    {
+        return -1;
+    }
+
+    const UiWidget *widget = ui_get_focused_widget(ui, screen);
+    if (widget == NULL)
+    {
+        return -1;
+    }
+
+    return widget->user_data;
 }

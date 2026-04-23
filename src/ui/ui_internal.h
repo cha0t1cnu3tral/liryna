@@ -60,6 +60,7 @@ struct UiWidget
     const char *const *picker_options;
     int picker_option_count;
     int *picker_index;
+    int user_data;
 };
 
 typedef struct UiScreenDefinition

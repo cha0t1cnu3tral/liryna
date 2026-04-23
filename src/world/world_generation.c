@@ -194,6 +194,11 @@ static bool world_generation_is_water_biome(BiomeType biome_type)
            biome_type == BIOME_COAST;
 }
 
+static bool world_generation_is_cold_biome(BiomeType biome_type)
+{
+    return biome_type == BIOME_TUNDRA || biome_type == BIOME_SNOWY_MOUNTAINS;
+}
+
 static bool world_generation_tile_can_host_feature(TileId tile_id)
 {
     const TileDefinition *tile = tiles_get_definition(tile_id);
@@ -335,21 +340,21 @@ static float world_generation_feature_density(BiomeType biome_type)
     switch (biome_type)
     {
     case BIOME_FOREST:
-        return 0.24f;
-    case BIOME_SWAMP:
-        return 0.20f;
-    case BIOME_MOUNTAINS:
         return 0.18f;
-    case BIOME_HILLS:
+    case BIOME_SWAMP:
         return 0.16f;
+    case BIOME_MOUNTAINS:
+        return 0.14f;
+    case BIOME_HILLS:
+        return 0.13f;
     case BIOME_DESERT:
-        return 0.12f;
+        return 0.10f;
     case BIOME_PLAINS:
     case BIOME_DRY_PLAINS_STEPPE:
     case BIOME_TUNDRA:
     case BIOME_SNOWY_MOUNTAINS:
     case BIOME_COAST:
-        return 0.10f;
+        return 0.07f;
     case BIOME_OCEAN:
     case BIOME_LAKE:
     case BIOME_RIVER:
@@ -459,6 +464,14 @@ static TileId world_generation_choose_feature_tile(BiomeType biome_type,
     {
         spawn_chance += 0.03f;
     }
+    if (spawn_chance > 0.42f)
+    {
+        spawn_chance = 0.42f;
+    }
+
+    const float cluster_noise =
+        world_generation_fractal_noise((float)x * 0.028f, (float)y * 0.028f, seed + 2909U, 2);
+    spawn_chance *= 0.55f + (cluster_noise * 0.90f);
     if (spawn_chance > 0.42f)
     {
         spawn_chance = 0.42f;
@@ -601,6 +614,48 @@ static TileId world_generation_choose_tile_from_biome(const BiomeDefinition *bio
     return TILE_GRASS;
 }
 
+static bool world_generation_biome_is_spawn_preferred(BiomeType biome_type)
+{
+    return biome_type == BIOME_PLAINS || biome_type == BIOME_FOREST || biome_type == BIOME_HILLS ||
+           biome_type == BIOME_DRY_PLAINS_STEPPE;
+}
+
+static bool world_generation_has_nearby_harsh_biome(const World *world,
+                                                    int center_x,
+                                                    int center_y,
+                                                    int radius)
+{
+    if (world == NULL || world->biomes == NULL || radius <= 0)
+    {
+        return false;
+    }
+
+    const int min_x = center_x - radius;
+    const int max_x = center_x + radius;
+    const int min_y = center_y - radius;
+    const int max_y = center_y + radius;
+
+    for (int y = min_y; y <= max_y; y++)
+    {
+        for (int x = min_x; x <= max_x; x++)
+        {
+            if (x < 0 || y < 0 || x >= world->width || y >= world->height)
+            {
+                continue;
+            }
+
+            const int index = world_generation_index_from_xy(world, x, y);
+            const BiomeType biome = world->biomes[index];
+            if (world_generation_is_water_biome(biome) || world_generation_is_cold_biome(biome))
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 bool world_generate_procedural(World *world, unsigned int seed)
 {
     if (world == NULL || world->tiles == NULL || world->biomes == NULL ||
@@ -620,13 +675,24 @@ bool world_generate_procedural(World *world, unsigned int seed)
             const float ny = ((float)y * inv_height) - 0.5f;
             const float distance_from_center = sqrtf((nx * nx) + (ny * ny));
 
-            const float elevation_noise = world_generation_fractal_noise(
-                (float)x * 0.024f, (float)y * 0.024f, seed + 17U, 4);
-            const float moisture = world_generation_fractal_noise(
-                (float)x * 0.020f, (float)y * 0.020f, seed + 47U, 3);
+            const float elevation_macro = world_generation_fractal_noise(
+                (float)x * 0.0055f, (float)y * 0.0055f, seed + 11U, 2);
+            const float elevation_micro = world_generation_fractal_noise(
+                (float)x * 0.0130f, (float)y * 0.0130f, seed + 17U, 4);
+            const float elevation_noise =
+                (elevation_macro * 0.58f) + (elevation_micro * 0.42f);
+            const float moisture_macro = world_generation_fractal_noise(
+                (float)x * 0.0052f, (float)y * 0.0052f, seed + 41U, 2);
+            const float moisture_micro = world_generation_fractal_noise(
+                (float)x * 0.0110f, (float)y * 0.0110f, seed + 47U, 3);
+            const float moisture = (moisture_macro * 0.64f) + (moisture_micro * 0.36f);
 
             float temperature = world_generation_fractal_noise(
-                (float)x * 0.017f, (float)y * 0.017f, seed + 83U, 3);
+                (float)x * 0.0095f, (float)y * 0.0095f, seed + 83U, 3);
+            temperature = (temperature * 0.62f) +
+                          (world_generation_fractal_noise(
+                               (float)x * 0.0045f, (float)y * 0.0045f, seed + 89U, 2) *
+                           0.38f);
             temperature -= fabsf(ny) * 0.42f;
             if (temperature < 0.0f)
             {
@@ -707,17 +773,22 @@ bool world_find_spawn_tile(const World *world, int *out_x, int *out_y)
 
                     const int index = world_generation_index_from_xy(world, x, y);
                     const BiomeType biome = world->biomes[index];
-                    if (pass == 0 && biome != BIOME_PLAINS)
+                    if (pass == 0 &&
+                        (!world_generation_biome_is_spawn_preferred(biome) ||
+                         world_generation_has_nearby_harsh_biome(world, x, y, 10)))
                     {
                         continue;
                     }
                     if (pass == 1 &&
-                        (biome == BIOME_TUNDRA || biome == BIOME_SNOWY_MOUNTAINS ||
-                         world_generation_is_water_biome(biome)))
+                        (world_generation_is_cold_biome(biome) ||
+                         world_generation_is_water_biome(biome) ||
+                         world_generation_has_nearby_harsh_biome(world, x, y, 6)))
                     {
                         continue;
                     }
-                    if (pass == 2 && world_generation_is_water_biome(biome))
+                    if (pass == 2 &&
+                        (world_generation_is_water_biome(biome) ||
+                         world_generation_has_nearby_harsh_biome(world, x, y, 3)))
                     {
                         continue;
                     }
