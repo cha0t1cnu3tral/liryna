@@ -77,8 +77,12 @@ if(WIN32)
         message(FATAL_ERROR "The bundled Prism SDK does not include 32-bit Windows binaries.")
     endif()
 
-    set(PRISM_LIBRARY "${PRISM_PLATFORM_DIR}/dynamic/release/lib/prism.lib")
-    set(PRISM_RUNTIME "${PRISM_PLATFORM_DIR}/dynamic/release/bin/prism.dll")
+    set(PRISM_LIBRARY_DEBUG "${PRISM_PLATFORM_DIR}/dynamic/debug/lib/prism.lib")
+    set(PRISM_RUNTIME_DEBUG "${PRISM_PLATFORM_DIR}/dynamic/debug/bin/prism.dll")
+    set(PRISM_LIBRARY_RELEASE "${PRISM_PLATFORM_DIR}/dynamic/release/lib/prism.lib")
+    set(PRISM_RUNTIME_RELEASE "${PRISM_PLATFORM_DIR}/dynamic/release/bin/prism.dll")
+    set(PRISM_LIBRARY "${PRISM_LIBRARY_RELEASE}")
+    set(PRISM_RUNTIME "${PRISM_RUNTIME_RELEASE}")
 elseif(APPLE)
     set(PRISM_LIBRARY "${PRISM_SDK_ROOT}/macos/universal/dynamic/release/lib/libprism.dylib")
     set(PRISM_RUNTIME "${PRISM_LIBRARY}")
@@ -111,7 +115,16 @@ set_target_properties(prism_sdk PROPERTIES
 
 if(WIN32)
     set_target_properties(prism_sdk PROPERTIES
-        IMPORTED_IMPLIB "${PRISM_LIBRARY}"
+        IMPORTED_LOCATION_DEBUG "${PRISM_RUNTIME_DEBUG}"
+        IMPORTED_LOCATION_RELEASE "${PRISM_RUNTIME_RELEASE}"
+        IMPORTED_LOCATION_RELWITHDEBINFO "${PRISM_RUNTIME_RELEASE}"
+        IMPORTED_LOCATION_MINSIZEREL "${PRISM_RUNTIME_RELEASE}"
+        IMPORTED_IMPLIB_DEBUG "${PRISM_LIBRARY_DEBUG}"
+        IMPORTED_IMPLIB_RELEASE "${PRISM_LIBRARY_RELEASE}"
+        IMPORTED_IMPLIB_RELWITHDEBINFO "${PRISM_LIBRARY_RELEASE}"
+        IMPORTED_IMPLIB_MINSIZEREL "${PRISM_LIBRARY_RELEASE}"
+        MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
+        MAP_IMPORTED_CONFIG_MINSIZEREL Release
     )
 endif()
 

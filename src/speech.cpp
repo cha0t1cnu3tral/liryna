@@ -30,7 +30,7 @@ bool speech_init(void)
         return false;
     }
 
-    speech_backend = prism_registry_acquire_best(speech_context);
+    speech_backend = prism_registry_create_best(speech_context);
     if (!speech_backend)
     {
         std::fprintf(stderr, "speech: no Prism backend is available\n");

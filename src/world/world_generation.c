@@ -658,7 +658,7 @@ static bool world_generation_has_nearby_harsh_biome(const World *world,
 
 bool world_generate_procedural(World *world, unsigned int seed)
 {
-    if (world == NULL || world->tiles == NULL || world->biomes == NULL ||
+    if (world == NULL || world->ground_tiles == NULL || world->biomes == NULL ||
         world->temperatures_c == NULL || world->width <= 0 || world->height <= 0)
     {
         return false;
@@ -724,10 +724,21 @@ bool world_generate_procedural(World *world, unsigned int seed)
                 biome, x, y, seed + 131U, !is_water_biome, temperature_c);
             const TileId feature_tile_id = world_generation_choose_feature_tile(
                 biome_type, base_tile_id, x, y, seed + 719U, temperature_c, moisture, elevation);
-            const TileId tile_id = feature_tile_id != TILE_ID_COUNT ? feature_tile_id : base_tile_id;
-
             const int index = world_generation_index_from_xy(world, x, y);
-            world->tiles[index] = tile_id;
+            world->ground_tiles[index] = TILE_ID_COUNT;
+            world->floor_tiles[index] = TILE_ID_COUNT;
+            world->object_tiles[index] = TILE_ID_COUNT;
+            world->structure_tiles[index] = TILE_ID_COUNT;
+
+            if (base_tile_id != TILE_ID_COUNT)
+            {
+                world_set_tile(world, x, y, base_tile_id);
+            }
+            if (feature_tile_id != TILE_ID_COUNT)
+            {
+                world_set_tile(world, x, y, feature_tile_id);
+            }
+
             world->biomes[index] = biome_type;
             world->temperatures_c[index] = temperature_c;
         }
@@ -738,7 +749,7 @@ bool world_generate_procedural(World *world, unsigned int seed)
 
 bool world_find_spawn_tile(const World *world, int *out_x, int *out_y)
 {
-    if (world == NULL || world->tiles == NULL || world->biomes == NULL || out_x == NULL ||
+    if (world == NULL || world->ground_tiles == NULL || world->biomes == NULL || out_x == NULL ||
         out_y == NULL)
     {
         return false;
@@ -793,8 +804,7 @@ bool world_find_spawn_tile(const World *world, int *out_x, int *out_y)
                         continue;
                     }
 
-                    const TileDefinition *tile = tiles_get_definition(world->tiles[index]);
-                    if (tile != NULL && tile->walkable && !tile->blocks_land_movement)
+                    if (world_can_occupy_tile(world, x, y, NULL, NULL, NULL))
                     {
                         *out_x = x;
                         *out_y = y;

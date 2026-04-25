@@ -11,34 +11,239 @@ static int world_index_from_xy(const World *world, int x, int y)
     return (y * world->width) + x;
 }
 
-static const TileDefinition *world_get_tile_definition_at(const World *world, float x, float y)
+static TileId *world_layer_storage(World *world, TileLayer layer)
 {
-    if (world == NULL || world->tiles == NULL || world->tile_size <= 0)
+    if (world == NULL)
+    {
+        return NULL;
+    }
+
+    switch (layer)
+    {
+    case TILE_LAYER_GROUND:
+        return world->ground_tiles;
+    case TILE_LAYER_FLOOR:
+        return world->floor_tiles;
+    case TILE_LAYER_OBJECT:
+        return world->object_tiles;
+    case TILE_LAYER_STRUCTURE:
+        return world->structure_tiles;
+    case TILE_LAYER_UNKNOWN:
+    case TILE_LAYER_COUNT:
+    default:
+        return NULL;
+    }
+}
+
+static const TileId *world_layer_storage_const(const World *world, TileLayer layer)
+{
+    return world_layer_storage((World *)world, layer);
+}
+
+bool world_is_in_bounds(const World *world, int tile_x, int tile_y)
+{
+    return world != NULL && tile_x >= 0 && tile_y >= 0 &&
+           tile_x < world->width && tile_y < world->height;
+}
+
+TileId world_get_tile_id_at_layer(const World *world, int tile_x, int tile_y, TileLayer layer)
+{
+    const TileId *tiles = world_layer_storage_const(world, layer);
+    if (tiles == NULL || !world_is_in_bounds(world, tile_x, tile_y))
+    {
+        return TILE_ID_COUNT;
+    }
+
+    return tiles[world_index_from_xy(world, tile_x, tile_y)];
+}
+
+const TileDefinition *world_get_tile_at_layer(const World *world,
+                                              int tile_x,
+                                              int tile_y,
+                                              TileLayer layer)
+{
+    return tiles_get_definition(world_get_tile_id_at_layer(world, tile_x, tile_y, layer));
+}
+
+const TileDefinition *world_get_top_tile_at(const World *world, int tile_x, int tile_y)
+{
+    static const TileLayer k_layers[] = {
+        TILE_LAYER_STRUCTURE,
+        TILE_LAYER_OBJECT,
+        TILE_LAYER_FLOOR,
+        TILE_LAYER_GROUND,
+    };
+
+    for (int i = 0; i < (int)(sizeof(k_layers) / sizeof(k_layers[0])); i++)
+    {
+        const TileDefinition *tile = world_get_tile_at_layer(world, tile_x, tile_y, k_layers[i]);
+        if (tile != NULL)
+        {
+            return tile;
+        }
+    }
+
+    return NULL;
+}
+
+const TileDefinition *world_get_supporting_tile_at(const World *world, int tile_x, int tile_y)
+{
+    static const TileLayer k_layers[] = {
+        TILE_LAYER_STRUCTURE,
+        TILE_LAYER_OBJECT,
+        TILE_LAYER_FLOOR,
+        TILE_LAYER_GROUND,
+    };
+
+    for (int i = 0; i < (int)(sizeof(k_layers) / sizeof(k_layers[0])); i++)
+    {
+        const TileDefinition *tile = world_get_tile_at_layer(world, tile_x, tile_y, k_layers[i]);
+        if (tile == NULL)
+        {
+            continue;
+        }
+
+        if (tile->walkable && !tile->blocks_land_movement)
+        {
+            return tile;
+        }
+    }
+
+    return NULL;
+}
+
+bool world_can_occupy_tile(const World *world,
+                           int tile_x,
+                           int tile_y,
+                           bool *out_swimming,
+                           const TileDefinition **out_support_tile,
+                           const TileDefinition **out_top_tile)
+{
+    static const TileLayer k_layers[] = {
+        TILE_LAYER_STRUCTURE,
+        TILE_LAYER_OBJECT,
+        TILE_LAYER_FLOOR,
+        TILE_LAYER_GROUND,
+    };
+
+    bool can_walk = false;
+    bool can_swim = false;
+    const TileDefinition *support_tile = NULL;
+    const TileDefinition *top_tile = NULL;
+
+    for (int i = 0; i < (int)(sizeof(k_layers) / sizeof(k_layers[0])); i++)
+    {
+        const TileDefinition *tile = world_get_tile_at_layer(world, tile_x, tile_y, k_layers[i]);
+        if (tile == NULL)
+        {
+            continue;
+        }
+
+        if (top_tile == NULL)
+        {
+            top_tile = tile;
+        }
+
+        if (tile->blocks_land_movement)
+        {
+            can_walk = false;
+            can_swim = false;
+            support_tile = NULL;
+            break;
+        }
+
+        if (!can_walk && tile->walkable)
+        {
+            can_walk = true;
+            support_tile = tile;
+            can_swim = false;
+            break;
+        }
+
+        if (!can_walk && !can_swim && tile->is_liquid && !tile->blocks_swimming)
+        {
+            can_swim = true;
+            support_tile = tile;
+        }
+    }
+
+    if (out_swimming != NULL)
+    {
+        *out_swimming = can_swim;
+    }
+    if (out_support_tile != NULL)
+    {
+        *out_support_tile = support_tile;
+    }
+    if (out_top_tile != NULL)
+    {
+        *out_top_tile = top_tile;
+    }
+
+    return can_walk || can_swim;
+}
+
+static bool world_can_stand_on(const World *world, float x, float y)
+{
+    if (world == NULL || world->tile_size <= 0)
+    {
+        return false;
+    }
+
+    const int tile_x = (int)(x / (float)world->tile_size);
+    const int tile_y = (int)(y / (float)world->tile_size);
+    return world_can_occupy_tile(world, tile_x, tile_y, NULL, NULL, NULL);
+}
+
+static const TileDefinition *world_get_supporting_tile_definition_at(const World *world,
+                                                                     float x,
+                                                                     float y)
+{
+    if (world == NULL || world->tile_size <= 0)
     {
         return NULL;
     }
 
     const int tile_x = (int)(x / (float)world->tile_size);
     const int tile_y = (int)(y / (float)world->tile_size);
-    if (tile_x < 0 || tile_y < 0 || tile_x >= world->width || tile_y >= world->height)
-    {
-        return NULL;
-    }
-
-    return tiles_get_definition(world->tiles[world_index_from_xy(world, tile_x, tile_y)]);
+    return world_get_supporting_tile_at(world, tile_x, tile_y);
 }
 
-static bool world_can_stand_on(const World *world, float x, float y)
+bool world_set_tile_at_layer(World *world, int tile_x, int tile_y, TileLayer layer, TileId tile_id)
 {
-    const TileDefinition *tile = world_get_tile_definition_at(world, x, y);
-    if (tile == NULL)
+    TileId *tiles = world_layer_storage(world, layer);
+    if (tiles == NULL || !world_is_in_bounds(world, tile_x, tile_y))
     {
         return false;
     }
 
-    const bool can_walk = tile->walkable && !tile->blocks_land_movement;
-    const bool can_swim = tile->is_liquid && !tile->blocks_swimming;
-    return can_walk || can_swim;
+    if (tile_id != TILE_ID_COUNT)
+    {
+        const TileDefinition *tile = tiles_get_definition(tile_id);
+        if (tile == NULL || tile->layer != layer)
+        {
+            return false;
+        }
+    }
+
+    tiles[world_index_from_xy(world, tile_x, tile_y)] = tile_id;
+    return true;
+}
+
+bool world_set_tile(World *world, int tile_x, int tile_y, TileId tile_id)
+{
+    const TileDefinition *tile = tiles_get_definition(tile_id);
+    if (tile == NULL || tile->layer == TILE_LAYER_UNKNOWN || tile->layer >= TILE_LAYER_COUNT)
+    {
+        return false;
+    }
+
+    return world_set_tile_at_layer(world, tile_x, tile_y, tile->layer, tile_id);
+}
+
+bool world_clear_tile_at_layer(World *world, int tile_x, int tile_y, TileLayer layer)
+{
+    return world_set_tile_at_layer(world, tile_x, tile_y, layer, TILE_ID_COUNT);
 }
 
 static SDL_Color world_tile_color(const TileDefinition *tile)
@@ -70,6 +275,40 @@ static SDL_Color world_tile_color(const TileDefinition *tile)
     }
 }
 
+static SDL_FRect world_layer_rect(const World *world, int x, int y, TileLayer layer)
+{
+    const float tile_size = (float)world->tile_size;
+    const float origin_x = (float)(x * world->tile_size);
+    const float origin_y = (float)(y * world->tile_size);
+    float inset = 0.0f;
+
+    switch (layer)
+    {
+    case TILE_LAYER_FLOOR:
+        inset = tile_size * 0.08f;
+        break;
+    case TILE_LAYER_OBJECT:
+        inset = tile_size * 0.22f;
+        break;
+    case TILE_LAYER_STRUCTURE:
+        inset = tile_size * 0.12f;
+        break;
+    case TILE_LAYER_GROUND:
+    case TILE_LAYER_UNKNOWN:
+    case TILE_LAYER_COUNT:
+    default:
+        inset = 0.0f;
+        break;
+    }
+
+    SDL_FRect rect;
+    rect.x = origin_x + inset;
+    rect.y = origin_y + inset;
+    rect.w = tile_size - (inset * 2.0f);
+    rect.h = tile_size - (inset * 2.0f);
+    return rect;
+}
+
 bool world_init(World *world, int width, int height, int tile_size)
 {
     if (world == NULL || width <= 0 || height <= 0 || tile_size <= 0)
@@ -80,7 +319,10 @@ bool world_init(World *world, int width, int height, int tile_size)
     world->width = width;
     world->height = height;
     world->tile_size = tile_size;
-    world->tiles = NULL;
+    world->ground_tiles = NULL;
+    world->floor_tiles = NULL;
+    world->object_tiles = NULL;
+    world->structure_tiles = NULL;
     world->biomes = NULL;
     world->temperatures_c = NULL;
 
@@ -95,8 +337,26 @@ bool world_init(World *world, int width, int height, int tile_size)
     world->player_is_jumping = false;
 
     const int tile_count = width * height;
-    world->tiles = (TileId *)malloc((size_t)tile_count * sizeof(TileId));
-    if (world->tiles == NULL)
+    world->ground_tiles = (TileId *)malloc((size_t)tile_count * sizeof(TileId));
+    if (world->ground_tiles == NULL)
+    {
+        world_shutdown(world);
+        return false;
+    }
+    world->floor_tiles = (TileId *)malloc((size_t)tile_count * sizeof(TileId));
+    if (world->floor_tiles == NULL)
+    {
+        world_shutdown(world);
+        return false;
+    }
+    world->object_tiles = (TileId *)malloc((size_t)tile_count * sizeof(TileId));
+    if (world->object_tiles == NULL)
+    {
+        world_shutdown(world);
+        return false;
+    }
+    world->structure_tiles = (TileId *)malloc((size_t)tile_count * sizeof(TileId));
+    if (world->structure_tiles == NULL)
     {
         world_shutdown(world);
         return false;
@@ -112,6 +372,14 @@ bool world_init(World *world, int width, int height, int tile_size)
     {
         world_shutdown(world);
         return false;
+    }
+
+    for (int i = 0; i < tile_count; i++)
+    {
+        world->ground_tiles[i] = TILE_ID_COUNT;
+        world->floor_tiles[i] = TILE_ID_COUNT;
+        world->object_tiles[i] = TILE_ID_COUNT;
+        world->structure_tiles[i] = TILE_ID_COUNT;
     }
 
     const unsigned int seed = (unsigned int)time(NULL);
@@ -139,11 +407,14 @@ void world_update(World *world, float delta_time, float move_x, float move_y, bo
         return;
     }
 
-    const TileDefinition *current_tile =
-        world_get_tile_definition_at(world, world->player_x, world->player_y);
-    const bool can_swim_here =
-        current_tile != NULL && current_tile->is_liquid && !current_tile->blocks_swimming;
-    world->player_is_swimming = can_swim_here;
+    bool swimming_here = false;
+    world_can_occupy_tile(world,
+                          (int)(world->player_x / (float)world->tile_size),
+                          (int)(world->player_y / (float)world->tile_size),
+                          &swimming_here,
+                          NULL,
+                          NULL);
+    world->player_is_swimming = swimming_here;
 
     if (jump_pressed && !world->player_is_swimming)
     {
@@ -223,10 +494,14 @@ void world_update(World *world, float delta_time, float move_x, float move_y, bo
         world->player_y = max_y;
     }
 
-    const TileDefinition *updated_tile =
-        world_get_tile_definition_at(world, world->player_x, world->player_y);
-    world->player_is_swimming =
-        updated_tile != NULL && updated_tile->is_liquid && !updated_tile->blocks_swimming;
+    bool updated_swimming = false;
+    world_can_occupy_tile(world,
+                          (int)(world->player_x / (float)world->tile_size),
+                          (int)(world->player_y / (float)world->tile_size),
+                          &updated_swimming,
+                          NULL,
+                          NULL);
+    world->player_is_swimming = updated_swimming;
 }
 
 void world_render(World *world, SDL_Renderer *renderer)
@@ -251,13 +526,49 @@ void world_render(World *world, SDL_Renderer *renderer)
             tile_rect.w = (float)world->tile_size;
             tile_rect.h = (float)world->tile_size;
 
-            const int index = world_index_from_xy(world, x, y);
-            const TileDefinition *tile = tiles_get_definition(world->tiles[index]);
-            const SDL_Color fill_color = world_tile_color(tile);
+            const TileDefinition *ground_tile = world_get_tile_at_layer(world, x, y, TILE_LAYER_GROUND);
+            const TileDefinition *floor_tile = world_get_tile_at_layer(world, x, y, TILE_LAYER_FLOOR);
+            const TileDefinition *object_tile = world_get_tile_at_layer(world, x, y, TILE_LAYER_OBJECT);
+            const TileDefinition *structure_tile =
+                world_get_tile_at_layer(world, x, y, TILE_LAYER_STRUCTURE);
 
-            SDL_SetRenderDrawColor(renderer, fill_color.r, fill_color.g, fill_color.b,
-                                   fill_color.a);
-            SDL_RenderFillRect(renderer, &tile_rect);
+            const TileDefinition *layers[] = {
+                ground_tile,
+                floor_tile,
+                object_tile,
+                structure_tile,
+            };
+            const TileLayer layer_ids[] = {
+                TILE_LAYER_GROUND,
+                TILE_LAYER_FLOOR,
+                TILE_LAYER_OBJECT,
+                TILE_LAYER_STRUCTURE,
+            };
+
+            bool rendered_layer = false;
+            for (int layer_index = 0; layer_index < 4; layer_index++)
+            {
+                const TileDefinition *tile = layers[layer_index];
+                if (tile == NULL)
+                {
+                    continue;
+                }
+
+                const SDL_Color fill_color = world_tile_color(tile);
+                const SDL_FRect layer_rect = world_layer_rect(world, x, y, layer_ids[layer_index]);
+                SDL_SetRenderDrawColor(renderer, fill_color.r, fill_color.g, fill_color.b,
+                                       fill_color.a);
+                SDL_RenderFillRect(renderer, &layer_rect);
+                rendered_layer = true;
+            }
+
+            if (!rendered_layer)
+            {
+                const SDL_Color fill_color = world_tile_color(NULL);
+                SDL_SetRenderDrawColor(renderer, fill_color.r, fill_color.g, fill_color.b,
+                                       fill_color.a);
+                SDL_RenderFillRect(renderer, &tile_rect);
+            }
 
             SDL_SetRenderDrawColor(renderer, 55, 55, 55, 255);
             SDL_RenderRect(renderer, &tile_rect);
@@ -281,7 +592,7 @@ bool world_get_player_environment(const World *world,
                                   const BiomeDefinition **biome,
                                   float *temperature_c)
 {
-    if (world == NULL || world->tiles == NULL || world->biomes == NULL ||
+    if (world == NULL || world->ground_tiles == NULL || world->biomes == NULL ||
         world->temperatures_c == NULL || world->tile_size <= 0 ||
         world->width <= 0 || world->height <= 0)
     {
@@ -307,7 +618,7 @@ bool world_get_player_environment(const World *world,
     }
     if (tile)
     {
-        *tile = tiles_get_definition(world->tiles[index]);
+        *tile = world_get_supporting_tile_definition_at(world, world->player_x, world->player_y);
     }
     if (biome)
     {
@@ -328,8 +639,14 @@ void world_shutdown(World *world)
         return;
     }
 
-    free(world->tiles);
-    world->tiles = NULL;
+    free(world->ground_tiles);
+    world->ground_tiles = NULL;
+    free(world->floor_tiles);
+    world->floor_tiles = NULL;
+    free(world->object_tiles);
+    world->object_tiles = NULL;
+    free(world->structure_tiles);
+    world->structure_tiles = NULL;
     free(world->biomes);
     world->biomes = NULL;
     free(world->temperatures_c);

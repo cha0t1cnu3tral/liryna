@@ -132,6 +132,16 @@ static bool send_mci_command(const char *command)
     return false;
 }
 
+static bool try_mci_command(const char *command)
+{
+    if (command == NULL)
+    {
+        return false;
+    }
+
+    return mciSendStringA(command, NULL, 0, NULL) == 0;
+}
+
 static bool try_path(char *out_path, size_t out_size, const char *candidate)
 {
     if (out_path == NULL || out_size == 0 || candidate == NULL)
@@ -231,8 +241,57 @@ static bool resolve_track_path(const char *relative_path, char *out_path, size_t
         }
     }
 
-    SDL_free((void *)base_path);
     return found;
+}
+
+static bool open_mci_audio_track(const char *path, const char *alias)
+{
+    if (path == NULL || alias == NULL)
+    {
+        return false;
+    }
+
+    const char *extension = strrchr(path, '.');
+    const char *preferred_type = NULL;
+    const char *secondary_type = NULL;
+
+    if (extension != NULL)
+    {
+        if (SDL_strcasecmp(extension, ".mp3") == 0)
+        {
+            preferred_type = "mpegvideo";
+            secondary_type = "waveaudio";
+        }
+        else if (SDL_strcasecmp(extension, ".wav") == 0)
+        {
+            preferred_type = "waveaudio";
+            secondary_type = "mpegvideo";
+        }
+    }
+
+    char command[1400];
+    if (preferred_type != NULL)
+    {
+        SDL_snprintf(command, sizeof(command), "open \"%s\" type %s alias %s", path,
+                     preferred_type, alias);
+        if (send_mci_command(command))
+        {
+            return true;
+        }
+    }
+
+    if (secondary_type != NULL)
+    {
+        SDL_snprintf(command, sizeof(command), "open \"%s\" type %s alias %s", path,
+                     secondary_type, alias);
+        if (send_mci_command(command))
+        {
+            return true;
+        }
+    }
+
+    SDL_snprintf(command, sizeof(command), "open \"%s\" alias %s", path, alias);
+    return send_mci_command(command);
 }
 
 static bool open_track(OpeningSceneTrack *track)
@@ -255,21 +314,9 @@ static bool open_track(OpeningSceneTrack *track)
     }
 
     char command[1400];
-    SDL_snprintf(command, sizeof(command), "open \"%s\" type waveaudio alias %s", track_path,
-                 track->alias);
-    if (!send_mci_command(command))
+    if (!open_mci_audio_track(track_path, track->alias))
     {
-        SDL_snprintf(command, sizeof(command), "open \"%s\" type mpegvideo alias %s", track_path,
-                     track->alias);
-        if (!send_mci_command(command))
-        {
-            SDL_snprintf(command, sizeof(command), "open \"%s\" alias %s", track_path,
-                         track->alias);
-            if (!send_mci_command(command))
-            {
-                return false;
-            }
-        }
+        return false;
     }
 
     SDL_snprintf(command, sizeof(command), "set %s time format milliseconds", track->alias);
@@ -322,12 +369,24 @@ static void play_track(OpeningSceneTrack *track, bool repeat)
     char command[192];
     SDL_snprintf(command, sizeof(command), "setaudio %s volume to %d", track->alias,
                  effective_volume);
-    send_mci_command(command);
+    (void)try_mci_command(command);
 
     SDL_snprintf(command, sizeof(command), "seek %s to start", track->alias);
     send_mci_command(command);
-    SDL_snprintf(command, sizeof(command), repeat ? "play %s repeat" : "play %s", track->alias);
-    send_mci_command(command);
+    if (repeat)
+    {
+        SDL_snprintf(command, sizeof(command), "play %s repeat", track->alias);
+        if (!try_mci_command(command))
+        {
+            SDL_snprintf(command, sizeof(command), "play %s", track->alias);
+            send_mci_command(command);
+        }
+    }
+    else
+    {
+        SDL_snprintf(command, sizeof(command), "play %s", track->alias);
+        send_mci_command(command);
+    }
 }
 
 static void stop_all_tracks(void)

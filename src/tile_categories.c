@@ -13,6 +13,8 @@ const char *tile_category_name(TileCategory category)
         return "Rocks";
     case TILE_CATEGORY_FURNITURE:
         return "Furniture";
+    case TILE_CATEGORY_TOOLS:
+        return "Tools";
     case TILE_CATEGORY_WATER:
         return "Water";
     case TILE_CATEGORY_STRUCTURES:
@@ -85,11 +87,14 @@ TileCategory tile_category_for_definition(const TileDefinition *tile)
     case TILE_FRIDGE:
     case TILE_WASHINGMACHINE:
     case TILE_DRYER:
-    case TILE_SMALLAXE:
-    case TILE_PICKAXE:
     case TILE_READER:
     case TILE_RADIO:
         return TILE_CATEGORY_FURNITURE;
+    case TILE_SMALLAXE:
+    case TILE_PICKAXE:
+        return TILE_CATEGORY_TOOLS;
+    case TILE_WOOD:
+        return TILE_CATEGORY_MISC;
     case TILE_WOODFOUNDATION:
     case TILE_STONEFOUNDATION:
     case TILE_CONCRETEFOUNDATION:

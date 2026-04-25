@@ -50,9 +50,19 @@ typedef struct Game
     bool has_prev_blocked_tile;
     int prev_blocked_tile_x;
     int prev_blocked_tile_y;
+    int facing_dir_x;
+    int facing_dir_y;
 
     int tracker_category_index;
     int tracker_object_index;
+    bool auto_walk_active;
+    int auto_walk_target_x;
+    int auto_walk_target_y;
+    float auto_walk_stuck_seconds;
+    bool axe_chopping;
+    int axe_target_x;
+    int axe_target_y;
+    float axe_chop_seconds;
     int pending_hotbar_tile;
     int pending_inventory_slot;
 } Game;
@@ -62,6 +72,7 @@ static const TileCategory k_tracker_categories[] = {
     TILE_CATEGORY_PLANTS,
     TILE_CATEGORY_ROCKS,
     TILE_CATEGORY_FURNITURE,
+    TILE_CATEGORY_TOOLS,
     TILE_CATEGORY_WATER,
     TILE_CATEGORY_STRUCTURES,
     TILE_CATEGORY_TERRAIN,
@@ -70,6 +81,12 @@ static const TileCategory k_tracker_categories[] = {
 
 static const int k_tracker_category_count =
     (int)(sizeof(k_tracker_categories) / sizeof(k_tracker_categories[0]));
+
+static const float k_axe_chop_required_seconds = 3.0f;
+static const int k_tree_wood_min_yield = 15;
+static const int k_tree_wood_max_yield = 20;
+static const int k_tree_wood_auto_pickup_min = 12;
+static const int k_tree_wood_auto_pickup_max = 15;
 
 static void game_clear_pending_inventory_item(Game *game);
 
@@ -83,18 +100,7 @@ static void game_announce(const char *text, bool interrupt)
 
 static const TileDefinition *game_get_tile_at(const World *world, int tile_x, int tile_y)
 {
-    if (world == NULL || world->tiles == NULL || world->width <= 0 || world->height <= 0)
-    {
-        return NULL;
-    }
-
-    if (tile_x < 0 || tile_y < 0 || tile_x >= world->width || tile_y >= world->height)
-    {
-        return NULL;
-    }
-
-    const int index = (tile_y * world->width) + tile_x;
-    return tiles_get_definition(world->tiles[index]);
+    return world_get_top_tile_at(world, tile_x, tile_y);
 }
 
 static bool game_is_feature_blocking_tile(const TileDefinition *tile)
@@ -106,17 +112,28 @@ static bool game_is_feature_blocking_tile(const TileDefinition *tile)
 
 static void game_set_world_tile_if_in_bounds(World *world, int tile_x, int tile_y, TileId tile_id)
 {
-    if (world == NULL || world->tiles == NULL || world->width <= 0 || world->height <= 0)
+    if (world == NULL || tile_id < 0 || tile_id >= TILE_ID_COUNT)
     {
         return;
     }
 
-    if (tile_x < 0 || tile_y < 0 || tile_x >= world->width || tile_y >= world->height)
+    if (!world_set_tile(world, tile_x, tile_y, tile_id))
+    {
+        return;
+    }
+}
+
+static void game_clear_world_tile_if_in_bounds(World *world,
+                                               int tile_x,
+                                               int tile_y,
+                                               const TileDefinition *tile)
+{
+    if (world == NULL || tile == NULL)
     {
         return;
     }
 
-    world->tiles[(tile_y * world->width) + tile_x] = tile_id;
+    world_clear_tile_at_layer(world, tile_x, tile_y, tile->layer);
 }
 
 static bool game_tile_pickup_allowed_without_tools(const TileDefinition *tile)
@@ -127,7 +144,40 @@ static bool game_tile_pickup_allowed_without_tools(const TileDefinition *tile)
     }
 
     const TileCategory category = tile_category_for_definition(tile);
-    return category == TILE_CATEGORY_FURNITURE;
+    return category == TILE_CATEGORY_FURNITURE ||
+           category == TILE_CATEGORY_TOOLS ||
+           tile->id == TILE_WOOD;
+}
+
+static bool game_tile_is_tree(const TileDefinition *tile)
+{
+    return tile != NULL && tile_category_for_definition(tile) == TILE_CATEGORY_TREES;
+}
+
+static bool game_inventory_has_tile(const Inventory *inventory, TileId tile_id)
+{
+    if (inventory == NULL || tile_id < 0 || tile_id >= TILE_ID_COUNT)
+    {
+        return false;
+    }
+
+    if (inventory->mode == GAME_MODE_CREATIVE)
+    {
+        return true;
+    }
+
+    return inventory_tile_count(inventory, tile_id) > 0;
+}
+
+static bool game_selected_tool_is_axe(const Game *game)
+{
+    if (game == NULL)
+    {
+        return false;
+    }
+
+    return game->inventory.selected_tile == TILE_SMALLAXE &&
+           game_inventory_has_tile(&game->inventory, TILE_SMALLAXE);
 }
 
 static void game_announce_pickup_requirement(const TileDefinition *tile)
@@ -141,7 +191,7 @@ static void game_announce_pickup_requirement(const TileDefinition *tile)
     const TileCategory category = tile_category_for_definition(tile);
     if (category == TILE_CATEGORY_TREES)
     {
-        game_announce("Trees need tools before pickup. Not implemented yet.", true);
+        game_announce("Select the SmallAxe and hold space beside the tree to cut it.", true);
         return;
     }
 
@@ -187,7 +237,7 @@ static bool game_try_pickup_near_player(Game *game)
     {
         const int tile_x = player_tile_x + k_offsets[i][0];
         const int tile_y = player_tile_y + k_offsets[i][1];
-        const TileDefinition *tile = game_get_tile_at(&game->world, tile_x, tile_y);
+        const TileDefinition *tile = world_get_top_tile_at(&game->world, tile_x, tile_y);
         if (tile == NULL)
         {
             continue;
@@ -208,9 +258,9 @@ static bool game_try_pickup_near_player(Game *game)
             return false;
         }
 
-        game_set_world_tile_if_in_bounds(&game->world, tile_x, tile_y, TILE_GRASS);
+        game_clear_world_tile_if_in_bounds(&game->world, tile_x, tile_y, tile);
         char message[160];
-        snprintf(message, sizeof(message), "Picked up %s.",
+        snprintf(message, sizeof(message), "Picked up %s. Added to inventory.",
                  tile->name != NULL ? tile->name : "item");
         game_announce(message, true);
         return true;
@@ -226,6 +276,278 @@ static bool game_try_pickup_near_player(Game *game)
     }
 
     return false;
+}
+
+static bool game_try_auto_pickup_wood_near_player(Game *game)
+{
+    if (game == NULL || !game->world_loaded || game->game_mode != GAME_MODE_SURVIVAL ||
+        game->world.tile_size <= 0)
+    {
+        return false;
+    }
+
+    const int player_tile_x = (int)(game->world.player_x / (float)game->world.tile_size);
+    const int player_tile_y = (int)(game->world.player_y / (float)game->world.tile_size);
+    int picked_up = 0;
+
+    for (int offset_y = -1; offset_y <= 1; offset_y++)
+    {
+        for (int offset_x = -1; offset_x <= 1; offset_x++)
+        {
+            const int tile_x = player_tile_x + offset_x;
+            const int tile_y = player_tile_y + offset_y;
+            const TileDefinition *tile =
+                world_get_tile_at_layer(&game->world, tile_x, tile_y, TILE_LAYER_OBJECT);
+            if (tile == NULL || tile->id != TILE_WOOD)
+            {
+                continue;
+            }
+
+            if (!inventory_add_survival(&game->inventory, TILE_WOOD, 1))
+            {
+                if (picked_up == 0)
+                {
+                    game_announce("Inventory full.", true);
+                }
+                return picked_up > 0;
+            }
+
+            game_clear_world_tile_if_in_bounds(&game->world, tile_x, tile_y, tile);
+            picked_up++;
+        }
+    }
+
+    if (picked_up > 0)
+    {
+        char message[128];
+        snprintf(message, sizeof(message), "Picked up %d wood.", picked_up);
+        game_announce(message, true);
+        return true;
+    }
+
+    return false;
+}
+
+static bool game_find_axe_tree_target(const Game *game, int *out_x, int *out_y)
+{
+    if (game == NULL || !game->world_loaded || game->world.tile_size <= 0)
+    {
+        return false;
+    }
+
+    const int player_tile_x = (int)(game->world.player_x / (float)game->world.tile_size);
+    const int player_tile_y = (int)(game->world.player_y / (float)game->world.tile_size);
+
+    const int facing_x = game->facing_dir_x;
+    const int facing_y = game->facing_dir_y;
+    if (facing_x != 0 || facing_y != 0)
+    {
+        const int target_x = player_tile_x + facing_x;
+        const int target_y = player_tile_y + facing_y;
+        if (game_tile_is_tree(game_get_tile_at(&game->world, target_x, target_y)))
+        {
+            if (out_x != NULL)
+            {
+                *out_x = target_x;
+            }
+            if (out_y != NULL)
+            {
+                *out_y = target_y;
+            }
+            return true;
+        }
+    }
+
+    static const int k_offsets[][2] = {
+        {0, -1},
+        {1, 0},
+        {0, 1},
+        {-1, 0},
+        {1, -1},
+        {1, 1},
+        {-1, 1},
+        {-1, -1},
+    };
+
+    for (int i = 0; i < (int)(sizeof(k_offsets) / sizeof(k_offsets[0])); i++)
+    {
+        const int target_x = player_tile_x + k_offsets[i][0];
+        const int target_y = player_tile_y + k_offsets[i][1];
+        if (!game_tile_is_tree(game_get_tile_at(&game->world, target_x, target_y)))
+        {
+            continue;
+        }
+
+        if (out_x != NULL)
+        {
+            *out_x = target_x;
+        }
+        if (out_y != NULL)
+        {
+            *out_y = target_y;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static bool game_can_drop_wood_at(const Game *game, int tile_x, int tile_y)
+{
+    bool can_swim = false;
+    const TileDefinition *support_tile = NULL;
+    if (!world_can_occupy_tile(&game->world, tile_x, tile_y, &can_swim, &support_tile, NULL))
+    {
+        return false;
+    }
+
+    if (can_swim || support_tile == NULL ||
+        world_get_tile_at_layer(&game->world, tile_x, tile_y, TILE_LAYER_OBJECT) != NULL ||
+        world_get_tile_at_layer(&game->world, tile_x, tile_y, TILE_LAYER_STRUCTURE) != NULL)
+    {
+        return false;
+    }
+
+    const TileCategory category = tile_category_for_definition(support_tile);
+    return category == TILE_CATEGORY_TERRAIN || support_tile->layer == TILE_LAYER_GROUND ||
+           support_tile->layer == TILE_LAYER_FLOOR;
+}
+
+static int game_scatter_wood_drops(Game *game, int center_x, int center_y, int count)
+{
+    if (game == NULL || count <= 0)
+    {
+        return 0;
+    }
+
+    static const int k_offsets[][2] = {
+        {0, 0},
+        {1, 0},
+        {-1, 0},
+        {0, 1},
+        {0, -1},
+        {1, 1},
+        {-1, 1},
+        {1, -1},
+        {-1, -1},
+        {2, 0},
+        {-2, 0},
+        {0, 2},
+        {0, -2},
+    };
+
+    int dropped = 0;
+    for (int i = 0; i < (int)(sizeof(k_offsets) / sizeof(k_offsets[0])) && dropped < count; i++)
+    {
+        const int tile_x = center_x + k_offsets[i][0];
+        const int tile_y = center_y + k_offsets[i][1];
+        if (!game_can_drop_wood_at(game, tile_x, tile_y))
+        {
+            continue;
+        }
+
+        game_set_world_tile_if_in_bounds(&game->world, tile_x, tile_y, TILE_WOOD);
+        dropped++;
+    }
+
+    return dropped;
+}
+
+static void game_reset_axe_chop(Game *game)
+{
+    if (game == NULL)
+    {
+        return;
+    }
+
+    game->axe_chopping = false;
+    game->axe_target_x = -1;
+    game->axe_target_y = -1;
+    game->axe_chop_seconds = 0.0f;
+}
+
+static void game_complete_tree_chop(Game *game, int tree_x, int tree_y)
+{
+    const int total_yield =
+        k_tree_wood_min_yield + (rand() % (k_tree_wood_max_yield - k_tree_wood_min_yield + 1));
+    int auto_pickup =
+        k_tree_wood_auto_pickup_min +
+        (rand() % (k_tree_wood_auto_pickup_max - k_tree_wood_auto_pickup_min + 1));
+    if (auto_pickup > total_yield)
+    {
+        auto_pickup = total_yield;
+    }
+
+    int added = 0;
+    if (inventory_add_survival(&game->inventory, TILE_WOOD, auto_pickup))
+    {
+        added = auto_pickup;
+    }
+
+    const int intended_drops = total_yield - added;
+    world_clear_tile_at_layer(&game->world, tree_x, tree_y, TILE_LAYER_OBJECT);
+    const int dropped = game_scatter_wood_drops(game, tree_x, tree_y, intended_drops);
+
+    if (dropped < intended_drops)
+    {
+        inventory_add_survival(&game->inventory, TILE_WOOD, intended_drops - dropped);
+        added += intended_drops - dropped;
+    }
+
+    char message[192];
+    snprintf(message, sizeof(message),
+             "Tree cut down. %d wood added, %d wood dropped nearby.",
+             added, dropped);
+    game_announce(message, true);
+    game_reset_axe_chop(game);
+}
+
+static bool game_update_axe_use(Game *game, bool use_tool_down, bool use_tool_pressed, float delta_time)
+{
+    if (game == NULL || !use_tool_down || game->game_mode != GAME_MODE_SURVIVAL)
+    {
+        game_reset_axe_chop(game);
+        return false;
+    }
+
+    if (!game_selected_tool_is_axe(game))
+    {
+        if (use_tool_pressed)
+        {
+            game_announce("Select the SmallAxe to chop trees.", true);
+        }
+        game_reset_axe_chop(game);
+        return false;
+    }
+
+    int target_x = 0;
+    int target_y = 0;
+    if (!game_find_axe_tree_target(game, &target_x, &target_y))
+    {
+        if (use_tool_pressed)
+        {
+            game_announce("No tree in axe range.", true);
+        }
+        game_reset_axe_chop(game);
+        return true;
+    }
+
+    if (!game->axe_chopping || game->axe_target_x != target_x || game->axe_target_y != target_y)
+    {
+        game->axe_chopping = true;
+        game->axe_target_x = target_x;
+        game->axe_target_y = target_y;
+        game->axe_chop_seconds = 0.0f;
+        game_announce("Swinging axe. Hold space for 3 seconds.", true);
+    }
+
+    game->axe_chop_seconds += delta_time;
+    if (game->axe_chop_seconds >= k_axe_chop_required_seconds)
+    {
+        game_complete_tree_chop(game, target_x, target_y);
+    }
+
+    return true;
 }
 
 static void game_place_opening_wreckage(Game *game)
@@ -330,7 +652,7 @@ static bool game_find_object_in_category(const World *world,
                                          int *out_y,
                                          const TileDefinition **out_tile)
 {
-    if (world == NULL || world->tiles == NULL || world->width <= 0 ||
+    if (world == NULL || world->ground_tiles == NULL || world->width <= 0 ||
         world->height <= 0 || target_index < 0)
     {
         return false;
@@ -346,22 +668,33 @@ static bool game_find_object_in_category(const World *world,
     {
         for (int x = 0; x < world->width; x++)
         {
-            const int index = (y * world->width) + x;
-            const TileDefinition *tile = tiles_get_definition(world->tiles[index]);
-            if (tile == NULL || tile_category_for_definition(tile) != category)
-            {
-                continue;
-            }
+            static const TileLayer k_layers[] = {
+                TILE_LAYER_GROUND,
+                TILE_LAYER_FLOOR,
+                TILE_LAYER_OBJECT,
+                TILE_LAYER_STRUCTURE,
+            };
 
-            if (found_count == target_index)
+            for (int layer_index = 0; layer_index < (int)(sizeof(k_layers) / sizeof(k_layers[0]));
+                 layer_index++)
             {
-                found_x = x;
-                found_y = y;
-                found_tile = tile;
-                found_target = true;
-            }
+                const TileDefinition *tile =
+                    world_get_tile_at_layer(world, x, y, k_layers[layer_index]);
+                if (tile == NULL || tile_category_for_definition(tile) != category)
+                {
+                    continue;
+                }
 
-            found_count++;
+                if (found_count == target_index)
+                {
+                    found_x = x;
+                    found_y = y;
+                    found_tile = tile;
+                    found_target = true;
+                }
+
+                found_count++;
+            }
         }
     }
 
@@ -391,6 +724,24 @@ static bool game_find_object_in_category(const World *world,
     return true;
 }
 
+static bool game_get_tracker_target(const Game *game,
+                                    int *out_total,
+                                    int *out_x,
+                                    int *out_y,
+                                    const TileDefinition **out_tile)
+{
+    if (game == NULL || !game->world_loaded ||
+        game->tracker_category_index < 0 ||
+        game->tracker_category_index >= k_tracker_category_count)
+    {
+        return false;
+    }
+
+    const TileCategory category = k_tracker_categories[game->tracker_category_index];
+    return game_find_object_in_category(&game->world, category, game->tracker_object_index,
+                                        out_total, out_x, out_y, out_tile);
+}
+
 static void game_announce_tracker_focus(Game *game, bool interrupt)
 {
     if (game == NULL || !game->world_loaded || game->tracker_category_index < 0 ||
@@ -406,9 +757,8 @@ static void game_announce_tracker_focus(Game *game, bool interrupt)
     int object_y = 0;
     const TileDefinition *object_tile = NULL;
 
-    const bool has_object = game_find_object_in_category(
-        &game->world, category, game->tracker_object_index, &total, &object_x, &object_y,
-        &object_tile);
+    const bool has_object =
+        game_get_tracker_target(game, &total, &object_x, &object_y, &object_tile);
 
     if (!has_object || total <= 0)
     {
@@ -429,20 +779,17 @@ static void game_announce_tracker_focus(Game *game, bool interrupt)
 
 static void game_announce_tracker_coordinates(Game *game, bool interrupt)
 {
-    if (game == NULL || !game->world_loaded || game->tracker_category_index < 0 ||
-        game->tracker_category_index >= k_tracker_category_count)
+    if (game == NULL)
     {
         return;
     }
 
-    const TileCategory category = k_tracker_categories[game->tracker_category_index];
     int total = 0;
     int object_x = 0;
     int object_y = 0;
     const TileDefinition *object_tile = NULL;
-    const bool has_object = game_find_object_in_category(
-        &game->world, category, game->tracker_object_index, &total, &object_x, &object_y,
-        &object_tile);
+    const bool has_object =
+        game_get_tracker_target(game, &total, &object_x, &object_y, &object_tile);
 
     if (!has_object || total <= 0)
     {
@@ -455,6 +802,169 @@ static void game_announce_tracker_coordinates(Game *game, bool interrupt)
              object_tile != NULL && object_tile->name != NULL ? object_tile->name : "Object",
              object_x, object_y);
     game_announce(message, interrupt);
+}
+
+static void game_cancel_auto_walk(Game *game, const char *message, bool interrupt)
+{
+    if (game == NULL)
+    {
+        return;
+    }
+
+    game->auto_walk_active = false;
+    game->auto_walk_target_x = -1;
+    game->auto_walk_target_y = -1;
+    game->auto_walk_stuck_seconds = 0.0f;
+    if (message != NULL && message[0] != '\0')
+    {
+        game_announce(message, interrupt);
+    }
+}
+
+static bool game_start_auto_walk_to_tracker_target(Game *game)
+{
+    if (game == NULL || !game->world_loaded || game->world.tile_size <= 0)
+    {
+        return false;
+    }
+
+    int total = 0;
+    int object_x = 0;
+    int object_y = 0;
+    const TileDefinition *object_tile = NULL;
+    const bool has_object =
+        game_get_tracker_target(game, &total, &object_x, &object_y, &object_tile);
+    if (!has_object || total <= 0)
+    {
+        game_announce("Auto walk unavailable. No tracked object selected.", true);
+        return false;
+    }
+
+    const int player_tile_x = (int)(game->world.player_x / (float)game->world.tile_size);
+    const int player_tile_y = (int)(game->world.player_y / (float)game->world.tile_size);
+    if (player_tile_x == object_x && player_tile_y == object_y)
+    {
+        game_announce("Already at tracked object.", true);
+        return true;
+    }
+
+    game->auto_walk_active = true;
+    game->auto_walk_target_x = object_x;
+    game->auto_walk_target_y = object_y;
+    game->auto_walk_stuck_seconds = 0.0f;
+
+    char message[224];
+    snprintf(message, sizeof(message), "Auto walk started to %s at X %d Y %d.",
+             object_tile != NULL && object_tile->name != NULL ? object_tile->name : "object",
+             object_x, object_y);
+    game_announce(message, true);
+    return true;
+}
+
+static void game_apply_auto_walk(Game *game,
+                                 bool manual_move_input,
+                                 float *move_x,
+                                 float *move_y,
+                                 bool *jump_pressed)
+{
+    if (game == NULL || !game->auto_walk_active || move_x == NULL || move_y == NULL ||
+        jump_pressed == NULL)
+    {
+        return;
+    }
+
+    if (manual_move_input)
+    {
+        game_cancel_auto_walk(game, "Auto walk canceled.", true);
+        return;
+    }
+
+    if (!game->world_loaded || game->world.tile_size <= 0)
+    {
+        game_cancel_auto_walk(game, NULL, false);
+        return;
+    }
+
+    int total = 0;
+    int object_x = 0;
+    int object_y = 0;
+    const TileDefinition *object_tile = NULL;
+    const bool has_object =
+        game_get_tracker_target(game, &total, &object_x, &object_y, &object_tile);
+    if (!has_object || total <= 0)
+    {
+        game_cancel_auto_walk(game, "Auto walk target unavailable.", true);
+        return;
+    }
+
+    game->auto_walk_target_x = object_x;
+    game->auto_walk_target_y = object_y;
+
+    const int player_tile_x = (int)(game->world.player_x / (float)game->world.tile_size);
+    const int player_tile_y = (int)(game->world.player_y / (float)game->world.tile_size);
+    if (player_tile_x == game->auto_walk_target_x &&
+        player_tile_y == game->auto_walk_target_y)
+    {
+        game_cancel_auto_walk(game, "Reached tracked object.", true);
+        return;
+    }
+
+    const float target_world_x = (float)(game->auto_walk_target_x * game->world.tile_size);
+    const float target_world_y = (float)(game->auto_walk_target_y * game->world.tile_size);
+    const float delta_x = target_world_x - game->world.player_x;
+    const float delta_y = target_world_y - game->world.player_y;
+    const float move_length = SDL_sqrtf((delta_x * delta_x) + (delta_y * delta_y));
+    if (move_length <= 0.001f)
+    {
+        game_cancel_auto_walk(game, "Reached tracked object.", true);
+        return;
+    }
+
+    *move_x = delta_x / move_length;
+    *move_y = delta_y / move_length;
+    *jump_pressed = true;
+}
+
+static void game_update_auto_walk_progress(Game *game,
+                                           float player_x_before,
+                                           float player_y_before,
+                                           float delta_time)
+{
+    if (game == NULL || !game->auto_walk_active)
+    {
+        return;
+    }
+
+    if (game->world.tile_size <= 0)
+    {
+        game_cancel_auto_walk(game, NULL, false);
+        return;
+    }
+
+    const int player_tile_x = (int)(game->world.player_x / (float)game->world.tile_size);
+    const int player_tile_y = (int)(game->world.player_y / (float)game->world.tile_size);
+    if (player_tile_x == game->auto_walk_target_x &&
+        player_tile_y == game->auto_walk_target_y)
+    {
+        game_cancel_auto_walk(game, "Reached tracked object.", true);
+        return;
+    }
+
+    const float moved =
+        SDL_fabsf(game->world.player_x - player_x_before) +
+        SDL_fabsf(game->world.player_y - player_y_before);
+    if (moved < 0.01f)
+    {
+        game->auto_walk_stuck_seconds += delta_time;
+        if (game->auto_walk_stuck_seconds >= 0.6f)
+        {
+            game_cancel_auto_walk(game, "Auto walk blocked before target.", true);
+        }
+    }
+    else
+    {
+        game->auto_walk_stuck_seconds = 0.0f;
+    }
 }
 
 static int game_find_survival_slot_for_tile(const Inventory *inventory, TileId tile_id)
@@ -670,6 +1180,13 @@ static bool game_create_new_world(Game *game, GameMode mode)
     game->has_prev_tile = false;
     game->tracker_category_index = 0;
     game->tracker_object_index = 0;
+    game->facing_dir_x = 0;
+    game->facing_dir_y = 1;
+    game->auto_walk_active = false;
+    game->auto_walk_target_x = -1;
+    game->auto_walk_target_y = -1;
+    game->auto_walk_stuck_seconds = 0.0f;
+    game_reset_axe_chop(game);
     game->pending_hotbar_tile = TILE_ID_COUNT;
     game->pending_inventory_slot = -1;
     game->has_prev_blocked_tile = false;
@@ -715,8 +1232,15 @@ static void game_init(Engine *engine, void *userdata)
     game->has_prev_blocked_tile = false;
     game->prev_blocked_tile_x = -1;
     game->prev_blocked_tile_y = -1;
+    game->facing_dir_x = 0;
+    game->facing_dir_y = 1;
     game->tracker_category_index = 0;
     game->tracker_object_index = 0;
+    game->auto_walk_active = false;
+    game->auto_walk_target_x = -1;
+    game->auto_walk_target_y = -1;
+    game->auto_walk_stuck_seconds = 0.0f;
+    game_reset_axe_chop(game);
     game->pending_hotbar_tile = TILE_ID_COUNT;
     game->pending_inventory_slot = -1;
     game->game_mode = GAME_MODE_SURVIVAL;
@@ -1002,6 +1526,9 @@ static void game_update(Engine *engine, void *userdata)
         water_biome_audio_update(NULL, delta_time);
         game->has_prev_tile = false;
         game->has_prev_blocked_tile = false;
+        game->auto_walk_active = false;
+        game->auto_walk_stuck_seconds = 0.0f;
+        game_reset_axe_chop(game);
         return;
     }
 
@@ -1010,6 +1537,9 @@ static void game_update(Engine *engine, void *userdata)
         water_biome_audio_update(NULL, delta_time);
         game->has_prev_tile = false;
         game->has_prev_blocked_tile = false;
+        game->auto_walk_active = false;
+        game->auto_walk_stuck_seconds = 0.0f;
+        game_reset_axe_chop(game);
         return;
     }
 
@@ -1040,9 +1570,23 @@ static void game_update(Engine *engine, void *userdata)
         move_x += 1.0f;
     }
 
+    if (move_x != 0.0f || move_y != 0.0f)
+    {
+        game->facing_dir_x = move_x > 0.0f ? 1 : (move_x < 0.0f ? -1 : 0);
+        game->facing_dir_y = move_y > 0.0f ? 1 : (move_y < 0.0f ? -1 : 0);
+    }
+
+    const bool tool_use_consumed =
+        game_update_axe_use(game, space_now, space_pressed, delta_time);
+    const bool manual_move_input = move_x != 0.0f || move_y != 0.0f;
+    bool jump_pressed = space_pressed && !tool_use_consumed;
+    game_apply_auto_walk(game, manual_move_input, &move_x, &move_y, &jump_pressed);
+
     const float player_x_before = game->world.player_x;
     const float player_y_before = game->world.player_y;
-    world_update(&game->world, delta_time, move_x, move_y, space_pressed);
+    world_update(&game->world, delta_time, move_x, move_y, jump_pressed);
+    game_update_auto_walk_progress(game, player_x_before, player_y_before, delta_time);
+    game_try_auto_pickup_wood_near_player(game);
     water_biome_audio_update(&game->world, delta_time);
 
     if (move_x != 0.0f || move_y != 0.0f)
@@ -1203,7 +1747,14 @@ static void game_update(Engine *engine, void *userdata)
 
     if (home_pressed)
     {
-        game_announce_tracker_coordinates(game, true);
+        if (ctrl_now)
+        {
+            game_start_auto_walk_to_tracker_target(game);
+        }
+        else
+        {
+            game_announce_tracker_coordinates(game, true);
+        }
     }
 }
 

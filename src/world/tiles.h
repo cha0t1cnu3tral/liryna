@@ -134,6 +134,7 @@ typedef enum TileId
     TILE_READER,
     TILE_RADIO,
     TILE_SHIPPIECE,
+    TILE_WOOD,
     TILE_ID_COUNT
 } TileId;
 

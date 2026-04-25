@@ -1489,6 +1489,21 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .resource_yield = 6,
         .renewable = false,
     },
+    {
+        .id = TILE_WOOD,
+        .name = "Wood",
+        .walkable = true,
+        .layer = TILE_LAYER_OBJECT,
+        .blocks_land_movement = false,
+        .blocks_swimming = true,
+        .buildable_on = true,
+        .requires_foundation = false,
+        .is_liquid = false,
+        .movement_cost_land = 1,
+        .primary_resource = "Wood",
+        .resource_yield = 1,
+        .renewable = false,
+    },
 };
 
 size_t tiles_count(void)

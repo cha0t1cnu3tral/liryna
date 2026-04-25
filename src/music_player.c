@@ -185,12 +185,10 @@ static bool resolve_music_path(char *out_path, size_t out_size, const char *rela
                      relative_path);
         if (try_path(out_path, out_size, candidate))
         {
-            SDL_free((void *)base_path);
             return true;
         }
     }
 
-    SDL_free((void *)base_path);
     return false;
 }
 
@@ -226,12 +224,10 @@ static bool resolve_music_directory(char *out_path, size_t out_size)
                      k_music_relative_directory);
         if (try_directory(out_path, out_size, candidate))
         {
-            SDL_free((void *)base_path);
             return true;
         }
     }
 
-    SDL_free((void *)base_path);
     return false;
 }
 
@@ -251,6 +247,16 @@ static bool send_mci_command(const char *command)
 
     fprintf(stderr, "music: MCI command failed: %s (%s)\n", command, error_text);
     return false;
+}
+
+static bool try_mci_command(const char *command)
+{
+    if (command == NULL)
+    {
+        return false;
+    }
+
+    return mciSendStringA(command, NULL, 0, NULL) == 0;
 }
 
 static bool query_mci_string(const char *command, char *out_text, size_t out_size)
@@ -383,6 +389,56 @@ static bool load_world_tracks(void)
     return true;
 }
 
+static bool open_mci_audio_track(const char *path, const char *alias)
+{
+    if (path == NULL || alias == NULL)
+    {
+        return false;
+    }
+
+    const char *extension = strrchr(path, '.');
+    const char *preferred_type = NULL;
+    const char *secondary_type = NULL;
+
+    if (extension != NULL)
+    {
+        if (SDL_strcasecmp(extension, ".mp3") == 0)
+        {
+            preferred_type = "mpegvideo";
+            secondary_type = "waveaudio";
+        }
+        else if (SDL_strcasecmp(extension, ".wav") == 0)
+        {
+            preferred_type = "waveaudio";
+            secondary_type = "mpegvideo";
+        }
+    }
+
+    char command[1400];
+    if (preferred_type != NULL)
+    {
+        SDL_snprintf(command, sizeof(command), "open \"%s\" type %s alias %s", path,
+                     preferred_type, alias);
+        if (send_mci_command(command))
+        {
+            return true;
+        }
+    }
+
+    if (secondary_type != NULL)
+    {
+        SDL_snprintf(command, sizeof(command), "open \"%s\" type %s alias %s", path,
+                     secondary_type, alias);
+        if (send_mci_command(command))
+        {
+            return true;
+        }
+    }
+
+    SDL_snprintf(command, sizeof(command), "open \"%s\" alias %s", path, alias);
+    return send_mci_command(command);
+}
+
 static void close_current_track(void)
 {
     if (!g_track_open)
@@ -420,7 +476,7 @@ static bool set_music_volume(int volume)
 
     char command[128];
     SDL_snprintf(command, sizeof(command), "setaudio %s volume to %d", k_music_alias, effective_volume);
-    if (!send_mci_command(command))
+    if (!try_mci_command(command))
     {
         g_volume_control_supported = false;
         g_current_effective_volume = effective_volume;
@@ -441,20 +497,9 @@ static bool open_and_play_track(const char *path, bool repeat)
     close_current_track();
 
     char command[1400];
-    SDL_snprintf(command, sizeof(command), "open \"%s\" type waveaudio alias %s", path,
-                 k_music_alias);
-    if (!send_mci_command(command))
+    if (!open_mci_audio_track(path, k_music_alias))
     {
-        SDL_snprintf(command, sizeof(command), "open \"%s\" type mpegvideo alias %s", path,
-                     k_music_alias);
-        if (!send_mci_command(command))
-        {
-            SDL_snprintf(command, sizeof(command), "open \"%s\" alias %s", path, k_music_alias);
-            if (!send_mci_command(command))
-            {
-                return false;
-            }
-        }
+        return false;
     }
 
     g_track_open = true;
@@ -474,7 +519,7 @@ static bool open_and_play_track(const char *path, bool repeat)
     }
 
     SDL_snprintf(command, sizeof(command), repeat ? "play %s repeat" : "play %s", k_music_alias);
-    if (!send_mci_command(command))
+    if (!try_mci_command(command))
     {
         SDL_snprintf(command, sizeof(command), "play %s", k_music_alias);
         if (!send_mci_command(command))

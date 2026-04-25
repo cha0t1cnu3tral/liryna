@@ -184,6 +184,16 @@ static bool send_mci_command(const char *command)
     return false;
 }
 
+static bool try_mci_command(const char *command)
+{
+    if (command == NULL)
+    {
+        return false;
+    }
+
+    return mciSendStringA(command, NULL, 0, NULL) == 0;
+}
+
 static bool read_mci_unsigned(const char *command, unsigned int *out_value)
 {
     if (command == NULL || out_value == NULL)
@@ -308,8 +318,57 @@ static bool resolve_track_path(const char *relative_path, char *out_path, size_t
         }
     }
 
-    SDL_free((void *)base_path);
     return found;
+}
+
+static bool open_mci_audio_track(const char *path, const char *alias)
+{
+    if (path == NULL || alias == NULL)
+    {
+        return false;
+    }
+
+    const char *extension = strrchr(path, '.');
+    const char *preferred_type = NULL;
+    const char *secondary_type = NULL;
+
+    if (extension != NULL)
+    {
+        if (SDL_strcasecmp(extension, ".mp3") == 0)
+        {
+            preferred_type = "mpegvideo";
+            secondary_type = "waveaudio";
+        }
+        else if (SDL_strcasecmp(extension, ".wav") == 0)
+        {
+            preferred_type = "waveaudio";
+            secondary_type = "mpegvideo";
+        }
+    }
+
+    char command[1400];
+    if (preferred_type != NULL)
+    {
+        SDL_snprintf(command, sizeof(command), "open \"%s\" type %s alias %s", path,
+                     preferred_type, alias);
+        if (send_mci_command(command))
+        {
+            return true;
+        }
+    }
+
+    if (secondary_type != NULL)
+    {
+        SDL_snprintf(command, sizeof(command), "open \"%s\" type %s alias %s", path,
+                     secondary_type, alias);
+        if (send_mci_command(command))
+        {
+            return true;
+        }
+    }
+
+    SDL_snprintf(command, sizeof(command), "open \"%s\" alias %s", path, alias);
+    return send_mci_command(command);
 }
 
 static int clamp_volume(int volume)
@@ -368,7 +427,7 @@ static void set_track_speed(BiomeAudioTrack *track, int speed_permille)
 
     char command[128];
     SDL_snprintf(command, sizeof(command), "set %s speed %d", track->alias, speed_permille);
-    if (send_mci_command(command))
+    if (try_mci_command(command))
     {
         track->speed_permille = speed_permille;
     }
@@ -401,14 +460,14 @@ static void set_track_channel_volume(BiomeAudioTrack *track, int left, int right
     if (left != track->left_volume)
     {
         SDL_snprintf(command, sizeof(command), "setaudio %s left volume to %d", track->alias, left);
-        send_mci_command(command);
+        (void)try_mci_command(command);
         track->left_volume = left;
     }
 
     if (right != track->right_volume)
     {
         SDL_snprintf(command, sizeof(command), "setaudio %s right volume to %d", track->alias, right);
-        send_mci_command(command);
+        (void)try_mci_command(command);
         track->right_volume = right;
     }
 }
@@ -561,32 +620,20 @@ static bool init_track(BiomeAudioTrack *track)
     }
 
     char command[1300];
-    SDL_snprintf(command, sizeof(command), "open \"%s\" type waveaudio alias %s", track_path,
-                 track->alias);
-    if (!send_mci_command(command))
+    if (!open_mci_audio_track(track_path, track->alias))
     {
-        SDL_snprintf(command, sizeof(command), "open \"%s\" type mpegvideo alias %s", track_path,
-                     track->alias);
-        if (!send_mci_command(command))
-        {
-            SDL_snprintf(command, sizeof(command), "open \"%s\" alias %s", track_path,
-                         track->alias);
-            if (!send_mci_command(command))
-            {
-                return false;
-            }
-        }
+        return false;
     }
 
     SDL_snprintf(command, sizeof(command), "set %s time format milliseconds", track->alias);
     send_mci_command(command);
 
     SDL_snprintf(command, sizeof(command), "setaudio %s left volume to 0", track->alias);
-    send_mci_command(command);
+    (void)try_mci_command(command);
     SDL_snprintf(command, sizeof(command), "setaudio %s right volume to 0", track->alias);
-    send_mci_command(command);
+    (void)try_mci_command(command);
     SDL_snprintf(command, sizeof(command), "set %s speed 1000", track->alias);
-    send_mci_command(command);
+    (void)try_mci_command(command);
     track->left_volume = 0;
     track->right_volume = 0;
     track->speed_permille = 1000;
@@ -615,7 +662,11 @@ static void start_all_tracks(void)
         SDL_snprintf(command, sizeof(command), "seek %s to start", g_tracks[i].alias);
         send_mci_command(command);
         SDL_snprintf(command, sizeof(command), "play %s repeat", g_tracks[i].alias);
-        send_mci_command(command);
+        if (!try_mci_command(command))
+        {
+            SDL_snprintf(command, sizeof(command), "play %s", g_tracks[i].alias);
+            send_mci_command(command);
+        }
     }
 
     g_tracks_playing = true;
@@ -685,7 +736,7 @@ void water_biome_audio_update(const World *world, float delta_time)
     const float update_dt = g_update_timer;
     g_update_timer = 0.0f;
 
-    if (!g_audio_started || world == NULL || world->tiles == NULL || world->biomes == NULL ||
+    if (!g_audio_started || world == NULL || world->ground_tiles == NULL || world->biomes == NULL ||
         world->width <= 0 || world->height <= 0 || world->tile_size <= 0)
     {
         stop_all_tracks();
@@ -710,18 +761,18 @@ void water_biome_audio_update(const World *world, float delta_time)
     bool player_swimming = false;
     if (player_in_bounds)
     {
-        const int player_index = (player_tile_y * world->width) + player_tile_x;
-        const TileId player_tile_id = world->tiles[player_index];
-        const TileDefinition *player_tile = tiles_get_definition(player_tile_id);
-        if (player_tile != NULL)
+        const TileDefinition *support_tile = NULL;
+        const TileDefinition *top_tile = NULL;
+        world_can_occupy_tile(world, player_tile_x, player_tile_y, &player_swimming,
+                              &support_tile, &top_tile);
+        if (support_tile != NULL)
         {
-            if (player_tile->walkable && player_tile->layer == TILE_LAYER_GROUND)
+            if (support_tile->layer == TILE_LAYER_GROUND || support_tile->layer == TILE_LAYER_FLOOR)
             {
                 player_on_ground_layer = true;
-                player_on_cold_ground = is_cold_ground_tile(player_tile_id);
-                player_on_ship_piece = player_tile_id == TILE_SHIPPIECE;
+                player_on_cold_ground = is_cold_ground_tile(support_tile->id);
+                player_on_ship_piece = support_tile->id == TILE_SHIPPIECE;
             }
-            player_swimming = player_tile->is_liquid && !player_tile->blocks_swimming;
         }
     }
     float movement_speed = 0.0f;
