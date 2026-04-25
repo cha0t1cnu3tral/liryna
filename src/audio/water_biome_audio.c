@@ -1,5 +1,6 @@
 #include "water_biome_audio.h"
 
+#include "audio_backend.h"
 #include "settings.h"
 
 #include <math.h>
@@ -8,15 +9,14 @@
 #include <string.h>
 
 #include <SDL3/SDL.h>
-#include "../world/world.h"
+#include <SDL3/SDL_iostream.h>
+#include <miniaudio.h>
 
-#ifdef _WIN32
-#include <windows.h>
+#include "../world/world.h"
 
 typedef struct BiomeAudioTrack
 {
     const char *relative_path;
-    const char *alias;
     bool (*matches_biome)(BiomeType biome_type);
     float peak_volume;
     bool apply_loop_smoothing;
@@ -24,10 +24,11 @@ typedef struct BiomeAudioTrack
     bool is_swim_track;
     bool footstep_is_cold;
     bool footstep_is_ship_piece;
-    int left_volume;
-    int right_volume;
-    int speed_permille;
-    unsigned int length_ms;
+    ma_sound sound;
+    float volume;
+    float pan;
+    float pitch;
+    float length_seconds;
     float drift_current;
     float drift_target;
     float drift_timer;
@@ -50,164 +51,53 @@ static bool is_cold_ground_tile(TileId tile_id);
 static BiomeAudioTrack g_tracks[] = {
     {
         .relative_path = "assets/sfx/Water.mp3",
-        .alias = "liryna_water_biome_ambience",
         .matches_biome = is_water_biome,
         .peak_volume = 950.0f,
-        .apply_loop_smoothing = false,
-        .is_footstep_track = false,
-        .is_swim_track = false,
-        .footstep_is_cold = false,
-        .footstep_is_ship_piece = false,
-        .left_volume = -1,
-        .right_volume = -1,
-        .speed_permille = -1,
-        .length_ms = 0U,
         .drift_current = 1.0f,
         .drift_target = 1.0f,
-        .drift_timer = 0.0f,
-        .initialized = false,
     },
     {
         .relative_path = "assets/sfx/tundra.mp3",
-        .alias = "liryna_tundra_biome_ambience",
         .matches_biome = is_tundra_biome,
         .peak_volume = 820.0f,
         .apply_loop_smoothing = true,
-        .is_footstep_track = false,
-        .is_swim_track = false,
-        .footstep_is_cold = false,
-        .footstep_is_ship_piece = false,
-        .left_volume = -1,
-        .right_volume = -1,
-        .speed_permille = -1,
-        .length_ms = 0U,
         .drift_current = 0.92f,
         .drift_target = 0.92f,
-        .drift_timer = 0.0f,
-        .initialized = false,
     },
     {
         .relative_path = "assets/sfx/tundrafootsteps.mp3.mp3",
-        .alias = "liryna_tundra_footsteps",
         .matches_biome = is_tundra_biome,
         .peak_volume = 900.0f,
-        .apply_loop_smoothing = false,
         .is_footstep_track = true,
-        .is_swim_track = false,
         .footstep_is_cold = true,
-        .footstep_is_ship_piece = false,
-        .left_volume = -1,
-        .right_volume = -1,
-        .speed_permille = -1,
-        .length_ms = 0U,
         .drift_current = 1.0f,
         .drift_target = 1.0f,
-        .drift_timer = 0.0f,
-        .initialized = false,
     },
     {
         .relative_path = "assets/sfx/forist.mp3",
-        .alias = "liryna_forest_footsteps",
-        .matches_biome = NULL,
         .peak_volume = 880.0f,
-        .apply_loop_smoothing = false,
         .is_footstep_track = true,
-        .is_swim_track = false,
-        .footstep_is_cold = false,
-        .footstep_is_ship_piece = false,
-        .left_volume = -1,
-        .right_volume = -1,
-        .speed_permille = -1,
-        .length_ms = 0U,
         .drift_current = 1.0f,
         .drift_target = 1.0f,
-        .drift_timer = 0.0f,
-        .initialized = false,
     },
     {
         .relative_path = "assets/sfx/swimmingsound.mp3",
-        .alias = "liryna_swimming",
-        .matches_biome = NULL,
         .peak_volume = 860.0f,
-        .apply_loop_smoothing = false,
-        .is_footstep_track = false,
         .is_swim_track = true,
-        .footstep_is_cold = false,
-        .footstep_is_ship_piece = false,
-        .left_volume = -1,
-        .right_volume = -1,
-        .speed_permille = -1,
-        .length_ms = 0U,
         .drift_current = 1.0f,
         .drift_target = 1.0f,
-        .drift_timer = 0.0f,
-        .initialized = false,
     },
     {
         .relative_path = "assets/sfx/shipfootstep.mp3",
-        .alias = "liryna_ship_piece_footsteps",
-        .matches_biome = NULL,
         .peak_volume = 900.0f,
-        .apply_loop_smoothing = false,
         .is_footstep_track = true,
-        .is_swim_track = false,
-        .footstep_is_cold = false,
         .footstep_is_ship_piece = true,
-        .left_volume = -1,
-        .right_volume = -1,
-        .speed_permille = -1,
-        .length_ms = 0U,
         .drift_current = 1.0f,
         .drift_target = 1.0f,
-        .drift_timer = 0.0f,
-        .initialized = false,
     },
 };
 
 static const size_t k_track_count = sizeof(g_tracks) / sizeof(g_tracks[0]);
-
-static bool send_mci_command(const char *command)
-{
-    char error_text[256];
-    const MCIERROR result = mciSendStringA(command, NULL, 0, NULL);
-    if (result == 0)
-    {
-        return true;
-    }
-
-    if (!mciGetErrorStringA(result, error_text, sizeof(error_text)))
-    {
-        SDL_snprintf(error_text, sizeof(error_text), "Unknown error %u", (unsigned int)result);
-    }
-
-    fprintf(stderr, "biome_audio: MCI command failed: %s (%s)\n", command, error_text);
-    return false;
-}
-
-static bool read_mci_unsigned(const char *command, unsigned int *out_value)
-{
-    if (command == NULL || out_value == NULL)
-    {
-        return false;
-    }
-
-    char result[128] = {0};
-    const MCIERROR status = mciSendStringA(command, result, (UINT)sizeof(result), NULL);
-    if (status != 0 || result[0] == '\0')
-    {
-        return false;
-    }
-
-    char *end = NULL;
-    const unsigned long parsed = strtoul(result, &end, 10);
-    if (end == result)
-    {
-        return false;
-    }
-
-    *out_value = (unsigned int)parsed;
-    return true;
-}
 
 static bool try_path(char *out_path, size_t out_size, const char *candidate)
 {
@@ -216,15 +106,7 @@ static bool try_path(char *out_path, size_t out_size, const char *candidate)
         return false;
     }
 
-    char normalized[1024];
-    const char *full_path = _fullpath(normalized, candidate, sizeof(normalized));
-    const char *path_to_test = candidate;
-    if (full_path != NULL)
-    {
-        path_to_test = normalized;
-    }
-
-    if (SDL_strlcpy(out_path, path_to_test, out_size) >= out_size)
+    if (SDL_strlcpy(out_path, candidate, out_size) >= out_size)
     {
         return false;
     }
@@ -239,6 +121,39 @@ static bool try_path(char *out_path, size_t out_size, const char *candidate)
     return true;
 }
 
+static bool try_alternate_extension(char *out_path, size_t out_size, const char *path)
+{
+    const char *dot = path != NULL ? strrchr(path, '.') : NULL;
+    if (dot == NULL)
+    {
+        return false;
+    }
+
+    char alternate_path[1024];
+    if (SDL_strcasecmp(dot, ".wav") == 0)
+    {
+        SDL_snprintf(alternate_path, sizeof(alternate_path), "%.*s.mp3",
+                     (int)(dot - path), path);
+        if (try_path(out_path, out_size, alternate_path))
+        {
+            return true;
+        }
+
+        SDL_snprintf(alternate_path, sizeof(alternate_path), "%.*s.mp3.mp3",
+                     (int)(dot - path), path);
+        return try_path(out_path, out_size, alternate_path);
+    }
+
+    if (SDL_strcasecmp(dot, ".mp3") == 0)
+    {
+        SDL_snprintf(alternate_path, sizeof(alternate_path), "%.*s.wav",
+                     (int)(dot - path), path);
+        return try_path(out_path, out_size, alternate_path);
+    }
+
+    return false;
+}
+
 static bool resolve_track_path(const char *relative_path, char *out_path, size_t out_size)
 {
     if (relative_path == NULL || out_path == NULL || out_size == 0)
@@ -246,40 +161,10 @@ static bool resolve_track_path(const char *relative_path, char *out_path, size_t
         return false;
     }
 
-    if (try_path(out_path, out_size, relative_path))
+    if (try_path(out_path, out_size, relative_path) ||
+        try_alternate_extension(out_path, out_size, relative_path))
     {
         return true;
-    }
-
-    const char *dot = strrchr(relative_path, '.');
-    if (dot != NULL)
-    {
-        char alternate_relative_path[1024];
-        if (SDL_strcasecmp(dot, ".wav") == 0)
-        {
-            SDL_snprintf(alternate_relative_path, sizeof(alternate_relative_path), "%.*s.mp3",
-                         (int)(dot - relative_path), relative_path);
-            if (try_path(out_path, out_size, alternate_relative_path))
-            {
-                return true;
-            }
-
-            SDL_snprintf(alternate_relative_path, sizeof(alternate_relative_path), "%.*s.mp3.mp3",
-                         (int)(dot - relative_path), relative_path);
-            if (try_path(out_path, out_size, alternate_relative_path))
-            {
-                return true;
-            }
-        }
-        else if (SDL_strcasecmp(dot, ".mp3") == 0)
-        {
-            SDL_snprintf(alternate_relative_path, sizeof(alternate_relative_path), "%.*s.wav",
-                         (int)(dot - relative_path), relative_path);
-            if (try_path(out_path, out_size, alternate_relative_path))
-            {
-                return true;
-            }
-        }
     }
 
     const char *base_path = SDL_GetBasePath();
@@ -290,9 +175,9 @@ static bool resolve_track_path(const char *relative_path, char *out_path, size_t
 
     static const char *k_prefixes[] = {
         "",
-        "..\\",
-        "..\\..\\",
-        "..\\..\\..\\",
+        "../",
+        "../../",
+        "../../../",
     };
     char candidate[1024];
     bool found = false;
@@ -301,7 +186,8 @@ static bool resolve_track_path(const char *relative_path, char *out_path, size_t
     {
         SDL_snprintf(candidate, sizeof(candidate), "%s%s%s", base_path, k_prefixes[i],
                      relative_path);
-        if (try_path(out_path, out_size, candidate))
+        if (try_path(out_path, out_size, candidate) ||
+            try_alternate_extension(out_path, out_size, candidate))
         {
             found = true;
             break;
@@ -312,105 +198,70 @@ static bool resolve_track_path(const char *relative_path, char *out_path, size_t
     return found;
 }
 
-static int clamp_volume(int volume)
-{
-    if (volume < 0)
-    {
-        return 0;
-    }
-    if (volume > 1000)
-    {
-        return 1000;
-    }
-
-    return volume;
-}
-
 static float random_unit(void)
 {
     g_rng_state = (1664525u * g_rng_state) + 1013904223u;
     return ((float)(g_rng_state >> 8) / (float)0x00FFFFFFu);
 }
 
-static int clamp_speed_permille(int speed_permille)
+static float clamp_pitch(float pitch)
 {
-    if (speed_permille < 500)
+    if (pitch < 0.5f)
     {
-        return 500;
+        return 0.5f;
     }
-    if (speed_permille > 2200)
+    if (pitch > 2.2f)
     {
-        return 2200;
+        return 2.2f;
     }
 
-    return speed_permille;
+    return pitch;
 }
 
-static void set_track_speed(BiomeAudioTrack *track, int speed_permille)
+static void set_track_pitch(BiomeAudioTrack *track, float pitch)
 {
     if (track == NULL)
     {
         return;
     }
 
-    speed_permille = clamp_speed_permille(speed_permille);
-
-    if (!g_audio_started)
-    {
-        track->speed_permille = speed_permille;
-        return;
-    }
-
-    if (track->speed_permille == speed_permille)
+    pitch = clamp_pitch(pitch);
+    if (fabsf(track->pitch - pitch) < 0.001f)
     {
         return;
     }
 
-    char command[128];
-    SDL_snprintf(command, sizeof(command), "set %s speed %d", track->alias, speed_permille);
-    if (send_mci_command(command))
+    if (track->initialized)
     {
-        track->speed_permille = speed_permille;
+        ma_sound_set_pitch(&track->sound, pitch);
     }
+    track->pitch = pitch;
 }
 
-static void set_track_channel_volume(BiomeAudioTrack *track, int left, int right)
+static void set_track_mix(BiomeAudioTrack *track, float volume, float pan)
 {
     if (track == NULL)
     {
         return;
     }
 
-    left = clamp_volume(left);
-    right = clamp_volume(right);
+    volume = SDL_clamp(volume, 0.0f, 1.0f);
+    pan = SDL_clamp(pan, -1.0f, 1.0f);
 
-    if (!g_audio_started)
-    {
-        track->left_volume = left;
-        track->right_volume = right;
-        return;
-    }
-
-    if (left == track->left_volume && right == track->right_volume)
+    if (fabsf(track->volume - volume) < 0.001f &&
+        fabsf(track->pan - pan) < 0.001f)
     {
         return;
     }
 
-    char command[128];
-
-    if (left != track->left_volume)
+    if (track->initialized)
     {
-        SDL_snprintf(command, sizeof(command), "setaudio %s left volume to %d", track->alias, left);
-        send_mci_command(command);
-        track->left_volume = left;
+        ma_sound_set_volume(&track->sound, volume);
+        ma_sound_set_pan(&track->sound, pan);
     }
 
-    if (right != track->right_volume)
-    {
-        SDL_snprintf(command, sizeof(command), "setaudio %s right volume to %d", track->alias, right);
-        send_mci_command(command);
-        track->right_volume = right;
-    }
+    track->volume = volume;
+    track->pan = pan;
 }
 
 static bool is_water_biome(BiomeType biome_type)
@@ -520,35 +371,38 @@ static float compute_loop_smoothing_gain(BiomeAudioTrack *track, float delta_tim
     const float drift_step = SDL_clamp(delta_time * 0.8f, 0.0f, 1.0f);
     track->drift_current += (track->drift_target - track->drift_current) * drift_step;
 
-    if (track->length_ms < 5000U)
+    if (track->length_seconds < 5.0f)
     {
         return track->drift_current;
     }
 
-    char command[128];
-    unsigned int position_ms = 0U;
-    SDL_snprintf(command, sizeof(command), "status %s position", track->alias);
-    if (!read_mci_unsigned(command, &position_ms))
+    float position = 0.0f;
+    if (ma_sound_get_cursor_in_seconds(&track->sound, &position) != MA_SUCCESS)
     {
         return track->drift_current;
     }
 
-    const float position = (float)position_ms;
-    const float length = (float)track->length_ms;
     const float from_start = position;
-    const float to_end = SDL_max(0.0f, length - position);
+    const float to_end = SDL_max(0.0f, track->length_seconds - position);
     const float edge_distance = SDL_min(from_start, to_end);
-    const float fade_window_ms = 1800.0f;
-    const float t = SDL_clamp(edge_distance / fade_window_ms, 0.0f, 1.0f);
+    const float fade_window_seconds = 1.8f;
+    const float t = SDL_clamp(edge_distance / fade_window_seconds, 0.0f, 1.0f);
     const float smooth = (t * t) * (3.0f - (2.0f * t));
 
-    g_tundra_loop_fade += (smooth - g_tundra_loop_fade) * SDL_clamp(delta_time * 4.0f, 0.0f, 1.0f);
+    g_tundra_loop_fade +=
+        (smooth - g_tundra_loop_fade) * SDL_clamp(delta_time * 4.0f, 0.0f, 1.0f);
     return track->drift_current * g_tundra_loop_fade;
 }
 
 static bool init_track(BiomeAudioTrack *track)
 {
     if (track == NULL)
+    {
+        return false;
+    }
+
+    ma_engine *engine = audio_backend_engine();
+    if (engine == NULL)
     {
         return false;
     }
@@ -560,41 +414,28 @@ static bool init_track(BiomeAudioTrack *track)
         return false;
     }
 
-    char command[1300];
-    SDL_snprintf(command, sizeof(command), "open \"%s\" type waveaudio alias %s", track_path,
-                 track->alias);
-    if (!send_mci_command(command))
+    const ma_uint32 flags = MA_SOUND_FLAG_NO_SPATIALIZATION;
+    const ma_result result =
+        ma_sound_init_from_file(engine, track_path, flags, NULL, NULL, &track->sound);
+    if (result != MA_SUCCESS)
     {
-        SDL_snprintf(command, sizeof(command), "open \"%s\" type mpegvideo alias %s", track_path,
-                     track->alias);
-        if (!send_mci_command(command))
-        {
-            SDL_snprintf(command, sizeof(command), "open \"%s\" alias %s", track_path,
-                         track->alias);
-            if (!send_mci_command(command))
-            {
-                return false;
-            }
-        }
+        fprintf(stderr, "biome_audio: failed to load %s: %s\n",
+                track_path, ma_result_description(result));
+        return false;
     }
 
-    SDL_snprintf(command, sizeof(command), "set %s time format milliseconds", track->alias);
-    send_mci_command(command);
+    ma_sound_set_looping(&track->sound, MA_TRUE);
+    ma_sound_set_volume(&track->sound, 0.0f);
+    ma_sound_set_pan(&track->sound, 0.0f);
+    ma_sound_set_pitch(&track->sound, 1.0f);
 
-    SDL_snprintf(command, sizeof(command), "setaudio %s left volume to 0", track->alias);
-    send_mci_command(command);
-    SDL_snprintf(command, sizeof(command), "setaudio %s right volume to 0", track->alias);
-    send_mci_command(command);
-    SDL_snprintf(command, sizeof(command), "set %s speed 1000", track->alias);
-    send_mci_command(command);
-    track->left_volume = 0;
-    track->right_volume = 0;
-    track->speed_permille = 1000;
+    track->volume = 0.0f;
+    track->pan = 0.0f;
+    track->pitch = 1.0f;
+    track->length_seconds = 0.0f;
     track->initialized = true;
 
-    SDL_snprintf(command, sizeof(command), "status %s length", track->alias);
-    (void)read_mci_unsigned(command, &track->length_ms);
-
+    (void)ma_sound_get_length_in_seconds(&track->sound, &track->length_seconds);
     return true;
 }
 
@@ -611,11 +452,12 @@ static void start_all_tracks(void)
         {
             continue;
         }
-        char command[160];
-        SDL_snprintf(command, sizeof(command), "seek %s to start", g_tracks[i].alias);
-        send_mci_command(command);
-        SDL_snprintf(command, sizeof(command), "play %s repeat", g_tracks[i].alias);
-        send_mci_command(command);
+
+        ma_sound_seek_to_pcm_frame(&g_tracks[i].sound, 0);
+        if (ma_sound_start(&g_tracks[i].sound) != MA_SUCCESS)
+        {
+            fprintf(stderr, "biome_audio: failed to start %s\n", g_tracks[i].relative_path);
+        }
     }
 
     g_tracks_playing = true;
@@ -634,11 +476,9 @@ static void stop_all_tracks(void)
         {
             continue;
         }
-        char command[160];
-        SDL_snprintf(command, sizeof(command), "stop %s", g_tracks[i].alias);
-        send_mci_command(command);
-        SDL_snprintf(command, sizeof(command), "seek %s to start", g_tracks[i].alias);
-        send_mci_command(command);
+
+        ma_sound_stop(&g_tracks[i].sound);
+        ma_sound_seek_to_pcm_frame(&g_tracks[i].sound, 0);
     }
 
     g_tracks_playing = false;
@@ -691,8 +531,8 @@ void water_biome_audio_update(const World *world, float delta_time)
         stop_all_tracks();
         for (size_t i = 0; i < k_track_count; i++)
         {
-            set_track_channel_volume(&g_tracks[i], 0, 0);
-            set_track_speed(&g_tracks[i], 1000);
+            set_track_mix(&g_tracks[i], 0.0f, 0.0f);
+            set_track_pitch(&g_tracks[i], 1.0f);
         }
         g_have_previous_player_position = false;
         return;
@@ -724,6 +564,7 @@ void water_biome_audio_update(const World *world, float delta_time)
             player_swimming = player_tile->is_liquid && !player_tile->blocks_swimming;
         }
     }
+
     float movement_speed = 0.0f;
     if (g_have_previous_player_position && update_dt > 0.0001f)
     {
@@ -744,12 +585,13 @@ void water_biome_audio_update(const World *world, float delta_time)
         {
             continue;
         }
+
         if (track->is_swim_track)
         {
             if (!player_swimming || movement_speed < 2.0f)
             {
-                set_track_channel_volume(track, 0, 0);
-                set_track_speed(track, 1000);
+                set_track_mix(track, 0.0f, 0.0f);
+                set_track_pitch(track, 1.0f);
                 continue;
             }
 
@@ -758,10 +600,11 @@ void water_biome_audio_update(const World *world, float delta_time)
             const float normalized_speed =
                 swim_speed > 0.001f ? SDL_clamp(movement_speed / swim_speed, 0.0f, 1.6f) : 0.0f;
             const float gain = SDL_clamp(0.28f + (normalized_speed * 0.52f), 0.0f, 1.0f);
-            const int base_volume = (int)(gain * track->peak_volume);
-            const int speed_permille = (int)(760.0f + (normalized_speed * 520.0f));
-            set_track_speed(track, speed_permille);
-            set_track_channel_volume(track, base_volume, base_volume);
+            const float volume =
+                SDL_clamp(gain * (track->peak_volume / 1000.0f), 0.0f, 1.0f);
+            const float pitch = 0.76f + (normalized_speed * 0.52f);
+            set_track_pitch(track, pitch);
+            set_track_mix(track, volume, 0.0f);
             continue;
         }
 
@@ -785,20 +628,22 @@ void water_biome_audio_update(const World *world, float delta_time)
             }
             if (!track_matches_current_surface || movement_speed < 2.0f)
             {
-                set_track_channel_volume(track, 0, 0);
-                set_track_speed(track, 1000);
+                set_track_mix(track, 0.0f, 0.0f);
+                set_track_pitch(track, 1.0f);
                 continue;
             }
 
             const float normalized_speed =
-                world->player_speed > 0.001f ? SDL_clamp(movement_speed / world->player_speed, 0.0f, 1.7f)
-                                             : 0.0f;
+                world->player_speed > 0.001f
+                    ? SDL_clamp(movement_speed / world->player_speed, 0.0f, 1.7f)
+                    : 0.0f;
             const float gain = SDL_clamp(0.30f + (normalized_speed * 0.50f), 0.0f, 1.0f);
             int base_volume = (int)(gain * track->peak_volume);
             base_volume = settings_effective_footsteps_mci_volume(base_volume);
-            const int speed_permille = (int)(700.0f + (normalized_speed * 600.0f));
-            set_track_speed(track, speed_permille);
-            set_track_channel_volume(track, base_volume, base_volume);
+            const float volume = SDL_clamp((float)base_volume / 1000.0f, 0.0f, 1.0f);
+            const float pitch = 0.70f + (normalized_speed * 0.60f);
+            set_track_pitch(track, pitch);
+            set_track_mix(track, volume, 0.0f);
             continue;
         }
 
@@ -810,7 +655,8 @@ void water_biome_audio_update(const World *world, float delta_time)
                                                       &best_x, &best_y, &best_distance_sq);
         if (!found)
         {
-            set_track_channel_volume(track, 0, 0);
+            set_track_mix(track, 0.0f, 0.0f);
+            set_track_pitch(track, 1.0f);
             continue;
         }
 
@@ -825,16 +671,11 @@ void water_biome_audio_update(const World *world, float delta_time)
 
         const float pan =
             SDL_clamp((float)(best_x - player_tile_x) / (float)hearing_radius_tiles, -1.0f, 1.0f);
-        const float angle = (pan + 1.0f) * SDL_PI_F * 0.25f;
-        const float left_gain = cosf(angle);
-        const float right_gain = sinf(angle);
-
         const int base_volume = settings_effective_ambience_mci_volume(
             (int)(base_gain * track->peak_volume));
-        const int left_volume = (int)(left_gain * (float)base_volume);
-        const int right_volume = (int)(right_gain * (float)base_volume);
-        set_track_channel_volume(track, left_volume, right_volume);
-        set_track_speed(track, 1000);
+        const float volume = SDL_clamp((float)base_volume / 1000.0f, 0.0f, 1.0f);
+        set_track_mix(track, volume, pan);
+        set_track_pitch(track, 1.0f);
     }
 }
 
@@ -851,14 +692,13 @@ void water_biome_audio_shutdown(void)
         {
             continue;
         }
-        char command[128];
-        SDL_snprintf(command, sizeof(command), "stop %s", g_tracks[i].alias);
-        send_mci_command(command);
-        SDL_snprintf(command, sizeof(command), "close %s", g_tracks[i].alias);
-        send_mci_command(command);
-        g_tracks[i].left_volume = -1;
-        g_tracks[i].right_volume = -1;
-        g_tracks[i].speed_permille = -1;
+
+        ma_sound_stop(&g_tracks[i].sound);
+        ma_sound_uninit(&g_tracks[i].sound);
+        g_tracks[i].volume = 0.0f;
+        g_tracks[i].pan = 0.0f;
+        g_tracks[i].pitch = 1.0f;
+        g_tracks[i].length_seconds = 0.0f;
         g_tracks[i].drift_current = g_tracks[i].apply_loop_smoothing ? 0.92f : 1.0f;
         g_tracks[i].drift_target = g_tracks[i].drift_current;
         g_tracks[i].drift_timer = 0.0f;
@@ -873,24 +713,3 @@ void water_biome_audio_shutdown(void)
     g_previous_player_x = 0.0f;
     g_previous_player_y = 0.0f;
 }
-
-#else
-
-bool water_biome_audio_init(void)
-{
-    return true;
-}
-
-void water_biome_audio_update(const World *world, float delta_time)
-{
-    (void)world;
-    (void)delta_time;
-}
-
-void water_biome_audio_shutdown(void)
-{
-}
-
-#endif
-
-
