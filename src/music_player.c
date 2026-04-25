@@ -13,9 +13,9 @@
 #include <mmsystem.h>
 #endif
 
-static const char *k_menu_music_relative_path = "assets/music/mm1 music opening.mp3";
-
 #ifdef _WIN32
+
+static const char *k_menu_music_relative_path = "assets/music/mm1 music opening.mp3";
 
 typedef enum MusicMode
 {

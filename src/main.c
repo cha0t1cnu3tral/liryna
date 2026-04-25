@@ -4,6 +4,7 @@
 #include <time.h>
 
 #include "engine.h"
+#include "audio_backend.h"
 #include "inventory.h"
 #include "music_player.h"
 #include "opening_scene.h"
@@ -468,7 +469,7 @@ static int game_find_survival_slot_for_tile(const Inventory *inventory, TileId t
     for (int slot_index = 0; slot_index < INVENTORY_SURVIVAL_SLOT_COUNT; slot_index++)
     {
         const InventorySlot *slot = &inventory->slots[slot_index];
-        if (slot->occupied && slot->tile_id == tile_id)
+        if (slot->occupied && slot->tile_id == (int)tile_id)
         {
             return slot_index;
         }
@@ -726,6 +727,11 @@ static void game_init(Engine *engine, void *userdata)
     if (!settings_load())
     {
         fprintf(stderr, "game: settings load failed\n");
+    }
+
+    if (!audio_backend_init())
+    {
+        fprintf(stderr, "game: miniaudio backend failed to start\n");
     }
 
     if (!music_player_start_main_menu_music())
@@ -1243,6 +1249,7 @@ static void game_shutdown(Engine *engine, void *userdata)
     music_player_shutdown();
     opening_scene_shutdown();
     water_biome_audio_shutdown();
+    audio_backend_shutdown();
     settings_save();
     speech_shutdown();
 }

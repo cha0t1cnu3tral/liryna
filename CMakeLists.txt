@@ -118,11 +118,27 @@ endif()
 target_include_directories(liryna
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniaudio"
 )
 
 target_link_libraries(liryna PRIVATE prism_sdk ${LIRYNA_SDL_TARGET})
 if(WIN32)
-    target_link_libraries(liryna PRIVATE winmm)
+    target_link_libraries(liryna PRIVATE winmm ole32 uuid avrt)
+elseif(APPLE)
+    find_library(COREAUDIO_LIBRARY CoreAudio REQUIRED)
+    find_library(AUDIOTOOLBOX_LIBRARY AudioToolbox REQUIRED)
+    find_library(AUDIOUNIT_LIBRARY AudioUnit REQUIRED)
+    find_library(COREFOUNDATION_LIBRARY CoreFoundation REQUIRED)
+    target_link_libraries(liryna PRIVATE
+        "${COREAUDIO_LIBRARY}"
+        "${AUDIOTOOLBOX_LIBRARY}"
+        "${AUDIOUNIT_LIBRARY}"
+        "${COREFOUNDATION_LIBRARY}"
+    )
+endif()
+if(UNIX AND NOT APPLE)
+    find_package(Threads REQUIRED)
+    target_link_libraries(liryna PRIVATE Threads::Threads m dl)
 endif()
 
 if(MSVC)
