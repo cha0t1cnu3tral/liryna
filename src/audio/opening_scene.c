@@ -1,5 +1,6 @@
 #include "opening_scene.h"
 
+#include "audio_backend.h"
 #include "settings.h"
 
 #include <stdbool.h>
@@ -8,16 +9,14 @@
 #include <string.h>
 
 #include <SDL3/SDL.h>
-
-#ifdef _WIN32
-#include <windows.h>
+#include <miniaudio.h>
 
 typedef struct OpeningSceneTrack
 {
     const char *relative_path;
-    const char *alias;
     int base_volume;
-    bool is_open;
+    ma_sound sound;
+    bool loaded;
 } OpeningSceneTrack;
 
 typedef struct OpeningSceneBeat
@@ -81,21 +80,15 @@ static const size_t k_beat_count = sizeof(g_beats) / sizeof(g_beats[0]);
 
 static OpeningSceneTrack g_spaceship_track = {
     .relative_path = "assets/sfx/opening scene/spaceship.mp3",
-    .alias = "liryna_opening_spaceship",
     .base_volume = 330,
-    .is_open = false,
 };
 static OpeningSceneTrack g_alarm_track = {
     .relative_path = "assets/sfx/opening scene/alarm.mp3",
-    .alias = "liryna_opening_alarm",
     .base_volume = 760,
-    .is_open = false,
 };
 static OpeningSceneTrack g_crash_track = {
     .relative_path = "assets/sfx/opening scene/crash.mp3",
-    .alias = "liryna_opening_crash",
     .base_volume = 920,
-    .is_open = false,
 };
 
 static OpeningSceneTrack *g_tracks[] = {
@@ -110,27 +103,6 @@ static bool g_initialized = false;
 static bool g_active = false;
 static int g_current_beat_index = -1;
 static float g_time_to_next_beat = 0.0f;
-static void apply_beat_audio(const OpeningSceneBeat *beat);
-static bool beat_has_text(const OpeningSceneBeat *beat);
-static void advance_scene(OpeningSceneAnnounceFn announce, bool skip_silent_beats);
-
-static bool send_mci_command(const char *command)
-{
-    char error_text[256];
-    const MCIERROR result = mciSendStringA(command, NULL, 0, NULL);
-    if (result == 0)
-    {
-        return true;
-    }
-
-    if (!mciGetErrorStringA(result, error_text, sizeof(error_text)))
-    {
-        SDL_snprintf(error_text, sizeof(error_text), "Unknown error %u", (unsigned int)result);
-    }
-
-    fprintf(stderr, "opening_scene: MCI command failed: %s (%s)\n", command, error_text);
-    return false;
-}
 
 static bool try_path(char *out_path, size_t out_size, const char *candidate)
 {
@@ -139,15 +111,7 @@ static bool try_path(char *out_path, size_t out_size, const char *candidate)
         return false;
     }
 
-    char normalized[1024];
-    const char *full_path = _fullpath(normalized, candidate, sizeof(normalized));
-    const char *path_to_test = candidate;
-    if (full_path != NULL)
-    {
-        path_to_test = normalized;
-    }
-
-    if (SDL_strlcpy(out_path, path_to_test, out_size) >= out_size)
+    if (SDL_strlcpy(out_path, candidate, out_size) >= out_size)
     {
         return false;
     }
@@ -162,6 +126,41 @@ static bool try_path(char *out_path, size_t out_size, const char *candidate)
     return true;
 }
 
+static bool try_alternate_extension(char *out_path,
+                                    size_t out_size,
+                                    const char *relative_path)
+{
+    const char *dot = relative_path != NULL ? strrchr(relative_path, '.') : NULL;
+    if (dot == NULL)
+    {
+        return false;
+    }
+
+    char alternate_path[1024];
+    if (SDL_strcasecmp(dot, ".wav") == 0)
+    {
+        SDL_snprintf(alternate_path, sizeof(alternate_path), "%.*s.mp3",
+                     (int)(dot - relative_path), relative_path);
+        if (try_path(out_path, out_size, alternate_path))
+        {
+            return true;
+        }
+
+        SDL_snprintf(alternate_path, sizeof(alternate_path), "%.*s.mp3.mp3",
+                     (int)(dot - relative_path), relative_path);
+        return try_path(out_path, out_size, alternate_path);
+    }
+
+    if (SDL_strcasecmp(dot, ".mp3") == 0)
+    {
+        SDL_snprintf(alternate_path, sizeof(alternate_path), "%.*s.wav",
+                     (int)(dot - relative_path), relative_path);
+        return try_path(out_path, out_size, alternate_path);
+    }
+
+    return false;
+}
+
 static bool resolve_track_path(const char *relative_path, char *out_path, size_t out_size)
 {
     if (relative_path == NULL || out_path == NULL || out_size == 0)
@@ -169,40 +168,10 @@ static bool resolve_track_path(const char *relative_path, char *out_path, size_t
         return false;
     }
 
-    if (try_path(out_path, out_size, relative_path))
+    if (try_path(out_path, out_size, relative_path) ||
+        try_alternate_extension(out_path, out_size, relative_path))
     {
         return true;
-    }
-
-    const char *dot = strrchr(relative_path, '.');
-    if (dot != NULL)
-    {
-        char alternate_relative_path[1024];
-        if (SDL_strcasecmp(dot, ".wav") == 0)
-        {
-            SDL_snprintf(alternate_relative_path, sizeof(alternate_relative_path), "%.*s.mp3",
-                         (int)(dot - relative_path), relative_path);
-            if (try_path(out_path, out_size, alternate_relative_path))
-            {
-                return true;
-            }
-
-            SDL_snprintf(alternate_relative_path, sizeof(alternate_relative_path), "%.*s.mp3.mp3",
-                         (int)(dot - relative_path), relative_path);
-            if (try_path(out_path, out_size, alternate_relative_path))
-            {
-                return true;
-            }
-        }
-        else if (SDL_strcasecmp(dot, ".mp3") == 0)
-        {
-            SDL_snprintf(alternate_relative_path, sizeof(alternate_relative_path), "%.*s.wav",
-                         (int)(dot - relative_path), relative_path);
-            if (try_path(out_path, out_size, alternate_relative_path))
-            {
-                return true;
-            }
-        }
     }
 
     const char *base_path = SDL_GetBasePath();
@@ -213,18 +182,19 @@ static bool resolve_track_path(const char *relative_path, char *out_path, size_t
 
     static const char *k_prefixes[] = {
         "",
-        "..\\",
-        "..\\..\\",
-        "..\\..\\..\\",
+        "../",
+        "../../",
+        "../../../",
     };
+
     char candidate[1024];
     bool found = false;
-
     for (size_t i = 0; i < sizeof(k_prefixes) / sizeof(k_prefixes[0]); i++)
     {
         SDL_snprintf(candidate, sizeof(candidate), "%s%s%s", base_path, k_prefixes[i],
                      relative_path);
-        if (try_path(out_path, out_size, candidate))
+        if (try_path(out_path, out_size, candidate) ||
+            try_alternate_extension(out_path, out_size, candidate))
         {
             found = true;
             break;
@@ -235,16 +205,34 @@ static bool resolve_track_path(const char *relative_path, char *out_path, size_t
     return found;
 }
 
-static bool open_track(OpeningSceneTrack *track)
+static float track_volume(const OpeningSceneTrack *track)
+{
+    if (track == NULL)
+    {
+        return 0.0f;
+    }
+
+    const int clamped_base = SDL_clamp(track->base_volume, 0, 1000);
+    const int effective_volume = settings_effective_ambience_mci_volume(clamped_base);
+    return SDL_clamp((float)effective_volume / 1000.0f, 0.0f, 1.0f);
+}
+
+static bool load_track(OpeningSceneTrack *track)
 {
     if (track == NULL)
     {
         return false;
     }
 
-    if (track->is_open)
+    if (track->loaded)
     {
         return true;
+    }
+
+    ma_engine *engine = audio_backend_engine();
+    if (engine == NULL)
+    {
+        return false;
     }
 
     char track_path[1024];
@@ -254,80 +242,59 @@ static bool open_track(OpeningSceneTrack *track)
         return false;
     }
 
-    char command[1400];
-    SDL_snprintf(command, sizeof(command), "open \"%s\" type waveaudio alias %s", track_path,
-                 track->alias);
-    if (!send_mci_command(command))
+    const ma_result result =
+        ma_sound_init_from_file(engine, track_path, 0, NULL, NULL, &track->sound);
+    if (result != MA_SUCCESS)
     {
-        SDL_snprintf(command, sizeof(command), "open \"%s\" type mpegvideo alias %s", track_path,
-                     track->alias);
-        if (!send_mci_command(command))
-        {
-            SDL_snprintf(command, sizeof(command), "open \"%s\" alias %s", track_path,
-                         track->alias);
-            if (!send_mci_command(command))
-            {
-                return false;
-            }
-        }
+        fprintf(stderr, "opening_scene: failed to load %s: %s\n",
+                track_path, ma_result_description(result));
+        return false;
     }
 
-    SDL_snprintf(command, sizeof(command), "set %s time format milliseconds", track->alias);
-    send_mci_command(command);
-    SDL_snprintf(command, sizeof(command), "seek %s to start", track->alias);
-    send_mci_command(command);
-
-    track->is_open = true;
+    ma_sound_set_volume(&track->sound, track_volume(track));
+    track->loaded = true;
     return true;
-}
-
-static void close_track(OpeningSceneTrack *track)
-{
-    if (track == NULL || !track->is_open)
-    {
-        return;
-    }
-
-    char command[160];
-    SDL_snprintf(command, sizeof(command), "stop %s", track->alias);
-    send_mci_command(command);
-    SDL_snprintf(command, sizeof(command), "close %s", track->alias);
-    send_mci_command(command);
-    track->is_open = false;
 }
 
 static void stop_track(OpeningSceneTrack *track)
 {
-    if (track == NULL || !track->is_open)
+    if (track == NULL || !track->loaded)
     {
         return;
     }
 
-    char command[160];
-    SDL_snprintf(command, sizeof(command), "stop %s", track->alias);
-    send_mci_command(command);
-    SDL_snprintf(command, sizeof(command), "seek %s to start", track->alias);
-    send_mci_command(command);
+    ma_sound_stop(&track->sound);
+    ma_sound_seek_to_pcm_frame(&track->sound, 0);
 }
 
 static void play_track(OpeningSceneTrack *track, bool repeat)
 {
-    if (track == NULL || !track->is_open)
+    if (track == NULL || !track->loaded)
     {
         return;
     }
 
-    const int clamped_base = SDL_clamp(track->base_volume, 0, 1000);
-    const int effective_volume = settings_effective_ambience_mci_volume(clamped_base);
-    char command[192];
-    SDL_snprintf(command, sizeof(command), "setaudio %s volume to %d", track->alias,
-                 effective_volume);
-    send_mci_command(command);
+    stop_track(track);
+    ma_sound_set_looping(&track->sound, repeat ? MA_TRUE : MA_FALSE);
+    ma_sound_set_volume(&track->sound, track_volume(track));
 
-    SDL_snprintf(command, sizeof(command), "seek %s to start", track->alias);
-    send_mci_command(command);
-    SDL_snprintf(command, sizeof(command), repeat ? "play %s repeat" : "play %s", track->alias);
-    send_mci_command(command);
+    const ma_result result = ma_sound_start(&track->sound);
+    if (result != MA_SUCCESS)
+    {
+        fprintf(stderr, "opening_scene: failed to play %s: %s\n",
+                track->relative_path, ma_result_description(result));
+    }
+}
+
+static void unload_track(OpeningSceneTrack *track)
+{
+    if (track == NULL || !track->loaded)
+    {
+        return;
+    }
+
+    ma_sound_uninit(&track->sound);
+    track->loaded = false;
 }
 
 static void stop_all_tracks(void)
@@ -338,22 +305,14 @@ static void stop_all_tracks(void)
     }
 }
 
-static void finish_scene(OpeningSceneAnnounceFn announce)
+static bool beat_has_text(const OpeningSceneBeat *beat)
 {
-    stop_all_tracks();
-    g_active = false;
-    g_current_beat_index = -1;
-    g_time_to_next_beat = 0.0f;
-
-    if (announce != NULL)
-    {
-        announce("Crash sequence complete. You are in control.", true);
-    }
+    return beat != NULL && beat->text != NULL && beat->text[0] != '\0';
 }
 
 static float beat_duration_seconds(const OpeningSceneBeat *beat)
 {
-    if (beat == NULL || beat->text == NULL || beat->text[0] == '\0')
+    if (!beat_has_text(beat))
     {
         return 3.0f;
     }
@@ -361,36 +320,6 @@ static float beat_duration_seconds(const OpeningSceneBeat *beat)
     const float characters = (float)strlen(beat->text);
     const float estimated = 1.8f + (characters * 0.043f);
     return SDL_clamp(estimated, 3.0f, 9.0f);
-}
-
-static bool beat_has_text(const OpeningSceneBeat *beat)
-{
-    return beat != NULL && beat->text != NULL && beat->text[0] != '\0';
-}
-
-static void advance_scene(OpeningSceneAnnounceFn announce, bool skip_silent_beats)
-{
-    bool keep_advancing = true;
-    while (keep_advancing)
-    {
-        g_current_beat_index++;
-        if (g_current_beat_index < 0 || (size_t)g_current_beat_index >= k_beat_count)
-        {
-            finish_scene(announce);
-            return;
-        }
-
-        const OpeningSceneBeat *beat = &g_beats[g_current_beat_index];
-        apply_beat_audio(beat);
-        g_time_to_next_beat = beat_duration_seconds(beat);
-
-        if (announce != NULL && beat_has_text(beat))
-        {
-            announce(beat->text, true);
-        }
-
-        keep_advancing = skip_silent_beats && !beat_has_text(beat);
-    }
 }
 
 static void apply_beat_audio(const OpeningSceneBeat *beat)
@@ -426,6 +355,44 @@ static void apply_beat_audio(const OpeningSceneBeat *beat)
     }
 }
 
+static void finish_scene(OpeningSceneAnnounceFn announce)
+{
+    stop_all_tracks();
+    g_active = false;
+    g_current_beat_index = -1;
+    g_time_to_next_beat = 0.0f;
+
+    if (announce != NULL)
+    {
+        announce("Crash sequence complete. You are in control.", true);
+    }
+}
+
+static void advance_scene(OpeningSceneAnnounceFn announce, bool skip_silent_beats)
+{
+    bool keep_advancing = true;
+    while (keep_advancing)
+    {
+        g_current_beat_index++;
+        if (g_current_beat_index < 0 || (size_t)g_current_beat_index >= k_beat_count)
+        {
+            finish_scene(announce);
+            return;
+        }
+
+        const OpeningSceneBeat *beat = &g_beats[g_current_beat_index];
+        apply_beat_audio(beat);
+        g_time_to_next_beat = beat_duration_seconds(beat);
+
+        if (announce != NULL && beat_has_text(beat))
+        {
+            announce(beat->text, true);
+        }
+
+        keep_advancing = skip_silent_beats && !beat_has_text(beat);
+    }
+}
+
 bool opening_scene_init(void)
 {
     if (g_initialized)
@@ -436,7 +403,7 @@ bool opening_scene_init(void)
     bool have_track = false;
     for (size_t i = 0; i < k_track_count; i++)
     {
-        if (open_track(g_tracks[i]))
+        if (load_track(g_tracks[i]))
         {
             have_track = true;
         }
@@ -445,6 +412,7 @@ bool opening_scene_init(void)
     g_initialized = true;
     g_active = false;
     g_current_beat_index = -1;
+    g_time_to_next_beat = 0.0f;
     return have_track;
 }
 
@@ -519,7 +487,7 @@ void opening_scene_shutdown(void)
     stop_all_tracks();
     for (size_t i = 0; i < k_track_count; i++)
     {
-        close_track(g_tracks[i]);
+        unload_track(g_tracks[i]);
     }
 
     g_active = false;
@@ -527,37 +495,3 @@ void opening_scene_shutdown(void)
     g_time_to_next_beat = 0.0f;
     g_initialized = false;
 }
-
-#else
-
-bool opening_scene_init(void)
-{
-    return true;
-}
-
-void opening_scene_start(OpeningSceneAnnounceFn announce)
-{
-    (void)announce;
-}
-
-void opening_scene_update(float delta_time, bool enter_pressed, OpeningSceneAnnounceFn announce)
-{
-    (void)delta_time;
-    (void)enter_pressed;
-    (void)announce;
-}
-
-bool opening_scene_is_active(void)
-{
-    return false;
-}
-
-void opening_scene_cancel(void)
-{
-}
-
-void opening_scene_shutdown(void)
-{
-}
-
-#endif
