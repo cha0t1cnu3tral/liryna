@@ -10,6 +10,7 @@
 #include "opening_scene.h"
 #include "settings.h"
 #include "speech.h"
+#include "tile_distance.h"
 #include "tile_categories.h"
 #include "water_biome_audio.h"
 #include "ui/ui.h"
@@ -35,6 +36,8 @@ typedef struct Game
     bool prev_c;
     bool prev_b;
     bool prev_t;
+    bool prev_j;
+    bool prev_k;
     bool prev_page_up;
     bool prev_page_down;
     bool prev_home;
@@ -48,6 +51,9 @@ typedef struct Game
     bool has_prev_tile;
     int prev_tile_x;
     int prev_tile_y;
+    bool cursor_locked_to_player;
+    int cursor_tile_x;
+    int cursor_tile_y;
     bool has_prev_blocked_tile;
     int prev_blocked_tile_x;
     int prev_blocked_tile_y;
@@ -74,6 +80,19 @@ static const int k_tracker_category_count =
 
 static void game_clear_pending_inventory_item(Game *game);
 
+static bool game_get_player_tile_position(const Game *game, int *out_x, int *out_y)
+{
+    if (game == NULL || !game->world_loaded || game->world.tile_size <= 0 ||
+        out_x == NULL || out_y == NULL)
+    {
+        return false;
+    }
+
+    *out_x = (int)(game->world.player_x / (float)game->world.tile_size);
+    *out_y = (int)(game->world.player_y / (float)game->world.tile_size);
+    return true;
+}
+
 static void game_announce(const char *text, bool interrupt)
 {
     if (!speech_say(text, interrupt))
@@ -96,6 +115,126 @@ static const TileDefinition *game_get_tile_at(const World *world, int tile_x, in
 
     const int index = (tile_y * world->width) + tile_x;
     return tiles_get_definition(world->tiles[index]);
+}
+
+static bool game_move_cursor(Game *game, int delta_x, int delta_y)
+{
+    if (game == NULL || !game->world_loaded)
+    {
+        return false;
+    }
+
+    if (game->cursor_locked_to_player)
+    {
+        int player_tile_x = 0;
+        int player_tile_y = 0;
+        if (!game_get_player_tile_position(game, &player_tile_x, &player_tile_y))
+        {
+            return false;
+        }
+
+        game->cursor_tile_x = player_tile_x;
+        game->cursor_tile_y = player_tile_y;
+    }
+
+    const int next_x = game->cursor_tile_x + delta_x;
+    const int next_y = game->cursor_tile_y + delta_y;
+    if (game_get_tile_at(&game->world, next_x, next_y) == NULL)
+    {
+        return false;
+    }
+
+    game->cursor_locked_to_player = false;
+    game->cursor_tile_x = next_x;
+    game->cursor_tile_y = next_y;
+    return true;
+}
+
+static void game_recenter_cursor(Game *game)
+{
+    if (game == NULL)
+    {
+        return;
+    }
+
+    int player_tile_x = 0;
+    int player_tile_y = 0;
+    if (!game_get_player_tile_position(game, &player_tile_x, &player_tile_y))
+    {
+        return;
+    }
+
+    game->cursor_locked_to_player = true;
+    game->cursor_tile_x = player_tile_x;
+    game->cursor_tile_y = player_tile_y;
+}
+
+static void game_announce_cursor_tile(Game *game, bool interrupt)
+{
+    if (game == NULL || !game->world_loaded)
+    {
+        return;
+    }
+
+    int player_tile_x = 0;
+    int player_tile_y = 0;
+    if (game_get_player_tile_position(game, &player_tile_x, &player_tile_y) &&
+        game->cursor_tile_x == player_tile_x &&
+        game->cursor_tile_y == player_tile_y)
+    {
+        game_announce("Player.", interrupt);
+        return;
+    }
+
+    const TileDefinition *tile =
+        game_get_tile_at(&game->world, game->cursor_tile_x, game->cursor_tile_y);
+    if (tile == NULL)
+    {
+        return;
+    }
+
+    char message[160];
+    snprintf(message, sizeof(message), "%s.",
+             tile->name != NULL ? tile->name : "Unknown");
+    game_announce(message, interrupt);
+}
+
+static void game_sync_cursor_to_player_if_locked(Game *game)
+{
+    if (game == NULL || !game->cursor_locked_to_player)
+    {
+        return;
+    }
+
+    game_recenter_cursor(game);
+}
+
+static void game_announce_cursor_distance(Game *game)
+{
+    if (game == NULL || !game->world_loaded)
+    {
+        return;
+    }
+
+    int player_tile_x = 0;
+    int player_tile_y = 0;
+    if (!game_get_player_tile_position(game, &player_tile_x, &player_tile_y))
+    {
+        game_announce("Unavailable.", true);
+        return;
+    }
+
+    char message[96];
+    if (!tile_distance_format_cardinal(
+            tile_distance_offset(player_tile_x, player_tile_y,
+                                 game->cursor_tile_x, game->cursor_tile_y),
+            message, sizeof(message)))
+    {
+        game_announce("Unavailable.", true);
+        return;
+    }
+
+    game_announce(message, true);
 }
 
 static bool game_is_feature_blocking_tile(const TileDefinition *tile)
@@ -168,8 +307,12 @@ static bool game_try_pickup_near_player(Game *game)
         return false;
     }
 
-    const int player_tile_x = (int)(game->world.player_x / (float)game->world.tile_size);
-    const int player_tile_y = (int)(game->world.player_y / (float)game->world.tile_size);
+    int player_tile_x = 0;
+    int player_tile_y = 0;
+    if (!game_get_player_tile_position(game, &player_tile_x, &player_tile_y))
+    {
+        return false;
+    }
     static const int k_offsets[][2] = {
         {0, 0},
         {1, 0},
@@ -236,8 +379,12 @@ static void game_place_opening_wreckage(Game *game)
         return;
     }
 
-    const int spawn_x = (int)(game->world.player_x / (float)game->world.tile_size);
-    const int spawn_y = (int)(game->world.player_y / (float)game->world.tile_size);
+    int spawn_x = 0;
+    int spawn_y = 0;
+    if (!game_get_player_tile_position(game, &spawn_x, &spawn_y))
+    {
+        return;
+    }
 
     for (int offset_y = -2; offset_y <= 2; offset_y++)
     {
@@ -698,6 +845,8 @@ static void game_init(Engine *engine, void *userdata)
     game->prev_c = false;
     game->prev_b = false;
     game->prev_t = false;
+    game->prev_j = false;
+    game->prev_k = false;
     game->prev_page_up = false;
     game->prev_page_down = false;
     game->prev_home = false;
@@ -713,6 +862,9 @@ static void game_init(Engine *engine, void *userdata)
     game->has_prev_tile = false;
     game->prev_tile_x = -1;
     game->prev_tile_y = -1;
+    game->cursor_locked_to_player = true;
+    game->cursor_tile_x = -1;
+    game->cursor_tile_y = -1;
     game->has_prev_blocked_tile = false;
     game->prev_blocked_tile_x = -1;
     game->prev_blocked_tile_y = -1;
@@ -772,6 +924,8 @@ static void game_update(Engine *engine, void *userdata)
     const bool c_now = engine_key_down(engine, SDL_SCANCODE_C);
     const bool b_now = engine_key_down(engine, SDL_SCANCODE_B);
     const bool t_now = engine_key_down(engine, SDL_SCANCODE_T);
+    const bool j_now = engine_key_down(engine, SDL_SCANCODE_J);
+    const bool k_now = engine_key_down(engine, SDL_SCANCODE_K);
     const bool page_up_now = engine_key_down(engine, SDL_SCANCODE_PAGEUP);
     const bool page_down_now = engine_key_down(engine, SDL_SCANCODE_PAGEDOWN);
     const bool home_now = engine_key_down(engine, SDL_SCANCODE_HOME);
@@ -814,6 +968,8 @@ static void game_update(Engine *engine, void *userdata)
     const bool c_pressed = c_now && !game->prev_c;
     const bool b_pressed = b_now && !game->prev_b;
     const bool t_pressed = t_now && !game->prev_t;
+    const bool j_pressed = j_now && !game->prev_j;
+    const bool k_pressed = k_now && !game->prev_k;
     const bool page_up_pressed = page_up_now && !game->prev_page_up;
     const bool page_down_pressed = page_down_now && !game->prev_page_down;
     const bool home_pressed = home_now && !game->prev_home;
@@ -845,6 +1001,8 @@ static void game_update(Engine *engine, void *userdata)
     game->prev_c = c_now;
     game->prev_b = b_now;
     game->prev_t = t_now;
+    game->prev_j = j_now;
+    game->prev_k = k_now;
     game->prev_page_up = page_up_now;
     game->prev_page_down = page_down_now;
     game->prev_home = home_now;
@@ -882,6 +1040,7 @@ static void game_update(Engine *engine, void *userdata)
                                   : GAME_MODE_SURVIVAL;
         if (game_create_new_world(game, mode))
         {
+            game_recenter_cursor(game);
             ui_show_screen(&game->ui, UI_SCREEN_WORLD,
                            game->speech_ready ? game_announce : NULL);
             if (mode == GAME_MODE_SURVIVAL)
@@ -1015,33 +1174,52 @@ static void game_update(Engine *engine, void *userdata)
     {
         water_biome_audio_update(NULL, delta_time);
         game->has_prev_tile = false;
+        game_sync_cursor_to_player_if_locked(game);
         game->has_prev_blocked_tile = false;
         return;
+    }
+
+    if (up_pressed)
+    {
+        game_move_cursor(game, 0, -1);
+    }
+    if (down_pressed)
+    {
+        game_move_cursor(game, 0, 1);
+    }
+    if (left_pressed)
+    {
+        game_move_cursor(game, -1, 0);
+    }
+    if (right_pressed)
+    {
+        game_move_cursor(game, 1, 0);
+    }
+
+    if (j_pressed)
+    {
+        game_recenter_cursor(game);
     }
 
     float move_x = 0.0f;
     float move_y = 0.0f;
 
-    if (engine_key_down(engine, SDL_SCANCODE_W) ||
-        engine_key_down(engine, SDL_SCANCODE_UP))
+    if (engine_key_down(engine, SDL_SCANCODE_W))
     {
         move_y -= 1.0f;
     }
 
-    if (engine_key_down(engine, SDL_SCANCODE_S) ||
-        engine_key_down(engine, SDL_SCANCODE_DOWN))
+    if (engine_key_down(engine, SDL_SCANCODE_S))
     {
         move_y += 1.0f;
     }
 
-    if (engine_key_down(engine, SDL_SCANCODE_A) ||
-        engine_key_down(engine, SDL_SCANCODE_LEFT))
+    if (engine_key_down(engine, SDL_SCANCODE_A))
     {
         move_x -= 1.0f;
     }
 
-    if (engine_key_down(engine, SDL_SCANCODE_D) ||
-        engine_key_down(engine, SDL_SCANCODE_RIGHT))
+    if (engine_key_down(engine, SDL_SCANCODE_D))
     {
         move_x += 1.0f;
     }
@@ -1050,6 +1228,7 @@ static void game_update(Engine *engine, void *userdata)
     const float player_y_before = game->world.player_y;
     world_update(&game->world, delta_time, move_x, move_y, space_pressed);
     water_biome_audio_update(&game->world, delta_time);
+    game_sync_cursor_to_player_if_locked(game);
 
     if (move_x != 0.0f || move_y != 0.0f)
     {
@@ -1072,27 +1251,23 @@ static void game_update(Engine *engine, void *userdata)
         game->has_prev_blocked_tile = false;
     }
 
-    int tile_x = 0;
-    int tile_y = 0;
-    const TileDefinition *tile = NULL;
+    int player_tile_x = 0;
+    int player_tile_y = 0;
+    const TileDefinition *player_tile = NULL;
     const BiomeDefinition *biome = NULL;
     float temperature_c = 0.0f;
-    const bool has_tile = world_get_player_environment(&game->world, &tile_x, &tile_y, &tile,
-                                                       &biome, &temperature_c);
-    if (has_tile)
+    const bool has_tile = world_get_player_environment(&game->world, &player_tile_x, &player_tile_y,
+                                                       &player_tile, &biome, &temperature_c);
+    if (game_get_tile_at(&game->world, game->cursor_tile_x, game->cursor_tile_y) != NULL)
     {
         const bool tile_changed = !game->has_prev_tile ||
-                                  tile_x != game->prev_tile_x ||
-                                  tile_y != game->prev_tile_y;
+                                  game->cursor_tile_x != game->prev_tile_x ||
+                                  game->cursor_tile_y != game->prev_tile_y;
         if (tile_changed)
         {
-            char message[160];
-            snprintf(message, sizeof(message), "%s.",
-                     tile != NULL && tile->name != NULL ? tile->name : "Unknown");
-            game_announce(message, true);
-
-            game->prev_tile_x = tile_x;
-            game->prev_tile_y = tile_y;
+            game_announce_cursor_tile(game, true);
+            game->prev_tile_x = game->cursor_tile_x;
+            game->prev_tile_y = game->cursor_tile_y;
             game->has_prev_tile = true;
         }
     }
@@ -1103,11 +1278,11 @@ static void game_update(Engine *engine, void *userdata)
         if (has_tile && alt_down)
         {
             snprintf(message, sizeof(message), "%s.",
-                     tile != NULL && tile->name != NULL ? tile->name : "Unknown");
+                     player_tile != NULL && player_tile->name != NULL ? player_tile->name : "Unknown");
         }
         else if (has_tile)
         {
-            snprintf(message, sizeof(message), "X %d Y %d.", tile_x, tile_y);
+            snprintf(message, sizeof(message), "X %d Y %d.", player_tile_x, player_tile_y);
         }
         else
         {
@@ -1150,6 +1325,11 @@ static void game_update(Engine *engine, void *userdata)
         }
 
         game_announce(message, true);
+    }
+
+    if (k_pressed)
+    {
+        game_announce_cursor_distance(game);
     }
 
     if (ctrl_now && (page_up_pressed || page_down_pressed))
