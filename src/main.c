@@ -4,11 +4,13 @@
 #include <time.h>
 
 #include "engine.h"
+#include "audio_backend.h"
 #include "inventory.h"
 #include "music_player.h"
 #include "opening_scene.h"
 #include "settings.h"
 #include "speech.h"
+#include "structure_builder.h"
 #include "tile_categories.h"
 #include "water_biome_audio.h"
 #include "ui/ui.h"
@@ -23,6 +25,8 @@ typedef struct Game
     bool speech_ready;
     GameMode game_mode;
     Inventory inventory;
+    bool structure_builder_active;
+    StructureBuilderConfig structure_builder_config;
 
     bool prev_up;
     bool prev_down;
@@ -40,6 +44,7 @@ typedef struct Game
     bool prev_tab;
     bool prev_space;
     bool prev_e;
+    bool prev_left_bracket;
     bool prev_right_bracket;
     bool prev_mouse_right;
     bool prev_hotbar_keys[INVENTORY_HOTBAR_SLOT_COUNT];
@@ -55,6 +60,11 @@ typedef struct Game
 
     int tracker_category_index;
     int tracker_object_index;
+    bool builder_fill_mode;
+    bool builder_fill_anchor_set;
+    int builder_fill_anchor_x;
+    int builder_fill_anchor_y;
+    int builder_shape_mode;
     bool auto_walk_active;
     int auto_walk_target_x;
     int auto_walk_target_y;
@@ -66,6 +76,14 @@ typedef struct Game
     int pending_hotbar_tile;
     int pending_inventory_slot;
 } Game;
+
+typedef enum BuilderShapeMode
+{
+    BUILDER_SHAPE_RECT_FILL = 0,
+    BUILDER_SHAPE_RECT_OUTLINE,
+    BUILDER_SHAPE_LINE,
+    BUILDER_SHAPE_COUNT
+} BuilderShapeMode;
 
 static const TileCategory k_tracker_categories[] = {
     TILE_CATEGORY_TREES,
@@ -82,6 +100,12 @@ static const TileCategory k_tracker_categories[] = {
 static const int k_tracker_category_count =
     (int)(sizeof(k_tracker_categories) / sizeof(k_tracker_categories[0]));
 
+static const char *const k_builder_shape_mode_names[BUILDER_SHAPE_COUNT] = {
+    "filled rectangle",
+    "rectangle outline",
+    "line",
+};
+
 static const float k_axe_chop_required_seconds = 3.0f;
 static const int k_tree_wood_min_yield = 15;
 static const int k_tree_wood_max_yield = 20;
@@ -89,6 +113,9 @@ static const int k_tree_wood_auto_pickup_min = 12;
 static const int k_tree_wood_auto_pickup_max = 15;
 
 static void game_clear_pending_inventory_item(Game *game);
+static void game_reset_builder_shape_state(Game *game);
+static bool game_tile_is_wall_like(const TileDefinition *tile);
+static void game_apply_structure_builder_biome(Game *game, BiomeType biome_type);
 
 static void game_announce(const char *text, bool interrupt)
 {
@@ -134,6 +161,548 @@ static void game_clear_world_tile_if_in_bounds(World *world,
     }
 
     world_clear_tile_at_layer(world, tile_x, tile_y, tile->layer);
+}
+
+static bool game_get_builder_target_tile(const Game *game, int *out_x, int *out_y)
+{
+    if (game == NULL || !game->world_loaded || game->world.tile_size <= 0 ||
+        out_x == NULL || out_y == NULL)
+    {
+        return false;
+    }
+
+    const int player_tile_x = (int)(game->world.player_x / (float)game->world.tile_size);
+    const int player_tile_y = (int)(game->world.player_y / (float)game->world.tile_size);
+    int facing_x = game->facing_dir_x;
+    int facing_y = game->facing_dir_y;
+    if (facing_x == 0 && facing_y == 0)
+    {
+        facing_y = 1;
+    }
+
+    *out_x = player_tile_x + facing_x;
+    *out_y = player_tile_y + facing_y;
+    return world_is_in_bounds(&game->world, *out_x, *out_y);
+}
+
+static void game_reset_builder_shape_state(Game *game)
+{
+    if (game == NULL)
+    {
+        return;
+    }
+
+    game->builder_fill_mode = false;
+    game->builder_fill_anchor_set = false;
+    game->builder_fill_anchor_x = -1;
+    game->builder_fill_anchor_y = -1;
+    game->builder_shape_mode = BUILDER_SHAPE_RECT_FILL;
+}
+
+static bool game_get_builder_selected_tile(const Game *game,
+                                           TileId *out_tile_id,
+                                           const TileDefinition **out_tile)
+{
+    if (game == NULL || out_tile_id == NULL || out_tile == NULL)
+    {
+        return false;
+    }
+
+    const TileId tile_id = (TileId)game->inventory.selected_tile;
+    const TileDefinition *tile = tiles_get_definition(tile_id);
+    if (tile == NULL || tile->layer == TILE_LAYER_UNKNOWN || tile->layer >= TILE_LAYER_COUNT)
+    {
+        return false;
+    }
+
+    *out_tile_id = tile_id;
+    *out_tile = tile;
+    return true;
+}
+
+static int game_abs_int(int value)
+{
+    return value < 0 ? -value : value;
+}
+
+static int game_builder_line_steps(int start_x, int start_y, int end_x, int end_y)
+{
+    const int dx = game_abs_int(end_x - start_x);
+    const int dy = game_abs_int(end_y - start_y);
+    return dx > dy ? dx : dy;
+}
+
+static int game_apply_builder_shape(World *world,
+                                    TileId tile_id,
+                                    BuilderShapeMode shape_mode,
+                                    int start_x,
+                                    int start_y,
+                                    int end_x,
+                                    int end_y)
+{
+    if (world == NULL || tile_id < 0 || tile_id >= TILE_ID_COUNT)
+    {
+        return 0;
+    }
+
+    int placed_count = 0;
+    const int min_x = start_x < end_x ? start_x : end_x;
+    const int max_x = start_x > end_x ? start_x : end_x;
+    const int min_y = start_y < end_y ? start_y : end_y;
+    const int max_y = start_y > end_y ? start_y : end_y;
+
+    switch (shape_mode)
+    {
+    case BUILDER_SHAPE_RECT_FILL:
+        for (int y = min_y; y <= max_y; y++)
+        {
+            for (int x = min_x; x <= max_x; x++)
+            {
+                if (world_set_tile(world, x, y, tile_id))
+                {
+                    placed_count++;
+                }
+            }
+        }
+        break;
+    case BUILDER_SHAPE_RECT_OUTLINE:
+        for (int y = min_y; y <= max_y; y++)
+        {
+            for (int x = min_x; x <= max_x; x++)
+            {
+                if (x != min_x && x != max_x && y != min_y && y != max_y)
+                {
+                    continue;
+                }
+
+                if (world_set_tile(world, x, y, tile_id))
+                {
+                    placed_count++;
+                }
+            }
+        }
+        break;
+    case BUILDER_SHAPE_LINE:
+    {
+        const int steps = game_builder_line_steps(start_x, start_y, end_x, end_y);
+        if (steps == 0)
+        {
+            if (world_set_tile(world, start_x, start_y, tile_id))
+            {
+                placed_count++;
+            }
+            break;
+        }
+
+        for (int step = 0; step <= steps; step++)
+        {
+            const float progress = (float)step / (float)steps;
+            const int x = (int)SDL_roundf(start_x + (end_x - start_x) * progress);
+            const int y = (int)SDL_roundf(start_y + (end_y - start_y) * progress);
+            if (world_set_tile(world, x, y, tile_id))
+            {
+                placed_count++;
+            }
+        }
+        break;
+    }
+    case BUILDER_SHAPE_COUNT:
+    default:
+        break;
+    }
+
+    return placed_count;
+}
+
+static bool game_find_walkable_builder_tile(const World *world,
+                                            int min_x,
+                                            int min_y,
+                                            int max_x,
+                                            int max_y,
+                                            bool interior_only,
+                                            int *out_x,
+                                            int *out_y)
+{
+    if (world == NULL || out_x == NULL || out_y == NULL)
+    {
+        return false;
+    }
+
+    int search_min_x = min_x;
+    int search_min_y = min_y;
+    int search_max_x = max_x;
+    int search_max_y = max_y;
+    if (interior_only)
+    {
+        search_min_x++;
+        search_min_y++;
+        search_max_x--;
+        search_max_y--;
+    }
+
+    if (search_min_x > search_max_x || search_min_y > search_max_y)
+    {
+        return false;
+    }
+
+    const int center_x = (search_min_x + search_max_x) / 2;
+    const int center_y = (search_min_y + search_max_y) / 2;
+    const int radius_x = search_max_x - search_min_x;
+    const int radius_y = search_max_y - search_min_y;
+    const int max_radius = radius_x > radius_y ? radius_x : radius_y;
+
+    for (int radius = 0; radius <= max_radius; radius++)
+    {
+        for (int y = center_y - radius; y <= center_y + radius; y++)
+        {
+            for (int x = center_x - radius; x <= center_x + radius; x++)
+            {
+                if (x < search_min_x || x > search_max_x || y < search_min_y || y > search_max_y)
+                {
+                    continue;
+                }
+
+                bool can_swim = false;
+                if (!world_can_occupy_tile(world, x, y, &can_swim, NULL, NULL) || can_swim)
+                {
+                    continue;
+                }
+
+                *out_x = x;
+                *out_y = y;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+static void game_move_builder_player_to_tile(Game *game, int tile_x, int tile_y)
+{
+    if (game == NULL || game->world.tile_size <= 0)
+    {
+        return;
+    }
+
+    game->world.player_x = (float)(tile_x * game->world.tile_size);
+    game->world.player_y = (float)(tile_y * game->world.tile_size);
+}
+
+static void game_place_builder_player_inside_wall(Game *game,
+                                                  BuilderShapeMode shape_mode,
+                                                  int start_x,
+                                                  int start_y,
+                                                  int end_x,
+                                                  int end_y)
+{
+    if (game == NULL)
+    {
+        return;
+    }
+
+    const int min_x = start_x < end_x ? start_x : end_x;
+    const int max_x = start_x > end_x ? start_x : end_x;
+    const int min_y = start_y < end_y ? start_y : end_y;
+    const int max_y = start_y > end_y ? start_y : end_y;
+
+    int destination_x = 0;
+    int destination_y = 0;
+    if (shape_mode != BUILDER_SHAPE_LINE &&
+        game_find_walkable_builder_tile(&game->world, min_x, min_y, max_x, max_y, true,
+                                        &destination_x, &destination_y))
+    {
+        game_move_builder_player_to_tile(game, destination_x, destination_y);
+        return;
+    }
+
+    if (game_find_walkable_builder_tile(&game->world, min_x, min_y, max_x, max_y, false,
+                                        &destination_x, &destination_y))
+    {
+        game_move_builder_player_to_tile(game, destination_x, destination_y);
+    }
+}
+
+static bool game_tile_is_wall_like(const TileDefinition *tile)
+{
+    if (tile == NULL)
+    {
+        return false;
+    }
+
+    switch (tile->id)
+    {
+    case TILE_LOGWALL:
+    case TILE_PLANKWALL:
+    case TILE_STONEWALL:
+    case TILE_BRICKWALL:
+    case TILE_CONCRETEWALL:
+    case TILE_REINFORCEDWALL:
+    case TILE_STEELWALL:
+    case TILE_GLASSWALL:
+    case TILE_METALWALL:
+    case TILE_FENCEWOOD:
+    case TILE_FENCEMETAL:
+    case TILE_FENCESTONE:
+    case TILE_FENCECHAIN:
+    case TILE_FENCEBARBED:
+    case TILE_BARRICADEWOOD:
+    case TILE_BARRICADESANDBAG:
+    case TILE_RUINEDWALL:
+    case TILE_CRACKEDWALL:
+        return true;
+    case TILE_ID_COUNT:
+    default:
+        return false;
+    }
+}
+
+static void game_apply_structure_builder_biome(Game *game, BiomeType biome_type)
+{
+    if (game == NULL || !game->structure_builder_active || !game->world_loaded)
+    {
+        return;
+    }
+
+    const BiomeType previous_biome = game->structure_builder_config.builder_biome;
+    const TileId previous_tile = structure_builder_biome_primary_tile(previous_biome);
+    const TileId next_tile = structure_builder_biome_primary_tile(biome_type);
+    const BiomeDefinition *biome = biome_get_definition(biome_type);
+    const float next_temperature_c =
+        biome != NULL ? (biome->min_temperature_c + biome->max_temperature_c) * 0.5f : 18.0f;
+
+    game->structure_builder_config.builder_biome = biome_type;
+    for (int biome_index = 0; biome_index < BIOME_TYPE_COUNT; biome_index++)
+    {
+        game->structure_builder_config.allowed_biomes[biome_index] =
+            biome_index == (int)biome_type;
+    }
+    structure_builder_set_allowed_supports_for_biome(&game->structure_builder_config, biome_type);
+
+    for (int y = 0; y < game->world.height; y++)
+    {
+        for (int x = 0; x < game->world.width; x++)
+        {
+            const int index = (y * game->world.width) + x;
+            game->world.biomes[index] = biome_type;
+            game->world.temperatures_c[index] = next_temperature_c;
+
+            if (world_get_tile_at_layer(&game->world, x, y, TILE_LAYER_FLOOR) != NULL ||
+                world_get_tile_at_layer(&game->world, x, y, TILE_LAYER_OBJECT) != NULL ||
+                world_get_tile_at_layer(&game->world, x, y, TILE_LAYER_STRUCTURE) != NULL)
+            {
+                continue;
+            }
+
+            if (world_get_tile_id_at_layer(&game->world, x, y, TILE_LAYER_GROUND) == previous_tile)
+            {
+                world_set_tile_at_layer(&game->world, x, y, TILE_LAYER_GROUND, next_tile);
+            }
+        }
+    }
+}
+
+static void game_cycle_structure_builder_biome(Game *game, int direction)
+{
+    if (game == NULL || !game->structure_builder_active)
+    {
+        return;
+    }
+
+    int next_biome = (int)game->structure_builder_config.builder_biome + direction;
+    while (next_biome < 0)
+    {
+        next_biome += BIOME_TYPE_COUNT;
+    }
+    while (next_biome >= BIOME_TYPE_COUNT)
+    {
+        next_biome -= BIOME_TYPE_COUNT;
+    }
+
+    game_apply_structure_builder_biome(game, (BiomeType)next_biome);
+
+    const BiomeDefinition *biome = biome_get_definition((BiomeType)next_biome);
+    char message[192];
+    snprintf(message, sizeof(message),
+             "Builder biome set to %s. Allowed biomes and support terrain updated for this biome.",
+             biome != NULL && biome->name != NULL ? biome->name : "Biome");
+    game_announce(message, true);
+}
+
+static void game_cycle_builder_shape_mode(Game *game, int direction)
+{
+    if (game == NULL)
+    {
+        return;
+    }
+
+    int next_mode = game->builder_shape_mode + direction;
+    while (next_mode < 0)
+    {
+        next_mode += BUILDER_SHAPE_COUNT;
+    }
+    while (next_mode >= BUILDER_SHAPE_COUNT)
+    {
+        next_mode -= BUILDER_SHAPE_COUNT;
+    }
+    game->builder_shape_mode = next_mode;
+
+    char message[192];
+    snprintf(message, sizeof(message), "Builder shape set to %s.",
+             k_builder_shape_mode_names[game->builder_shape_mode]);
+    game_announce(message, true);
+}
+
+static void game_toggle_builder_fill_mode(Game *game)
+{
+    if (game == NULL || !game->structure_builder_active)
+    {
+        return;
+    }
+
+    game->builder_fill_mode = !game->builder_fill_mode;
+    game->builder_fill_anchor_set = false;
+    game->builder_fill_anchor_x = -1;
+    game->builder_fill_anchor_y = -1;
+
+    if (game->builder_fill_mode)
+    {
+        char message[256];
+        snprintf(message, sizeof(message),
+                 "Builder fill mode on. Shape: %s. Press Enter to set the first corner, then Enter again to apply. Use left and right bracket to change shape.",
+                 k_builder_shape_mode_names[game->builder_shape_mode]);
+        game_announce(message, true);
+    }
+    else
+    {
+        game_announce("Builder fill mode off. Enter places one tile again.", true);
+    }
+}
+
+static bool game_place_selected_tile_in_builder(Game *game)
+{
+    if (game == NULL || !game->structure_builder_active)
+    {
+        return false;
+    }
+
+    TileId tile_id = TILE_ID_COUNT;
+    const TileDefinition *tile = NULL;
+    if (!game_get_builder_selected_tile(game, &tile_id, &tile))
+    {
+        game_announce("That tile cannot be placed in the builder.", true);
+        return false;
+    }
+
+    int tile_x = 0;
+    int tile_y = 0;
+    if (!game_get_builder_target_tile(game, &tile_x, &tile_y))
+    {
+        game_announce("Builder target is out of bounds.", true);
+        return false;
+    }
+
+    if (game->builder_fill_mode)
+    {
+        if (!game->builder_fill_anchor_set)
+        {
+            game->builder_fill_anchor_set = true;
+            game->builder_fill_anchor_x = tile_x;
+            game->builder_fill_anchor_y = tile_y;
+
+            char message[224];
+            snprintf(message, sizeof(message),
+                     "First corner set at X %d Y %d. Move to the second point and press Enter to apply the %s.",
+                     tile_x, tile_y, k_builder_shape_mode_names[game->builder_shape_mode]);
+            game_announce(message, true);
+            return true;
+        }
+
+        const int placed_count =
+            game_apply_builder_shape(&game->world,
+                                     tile_id,
+                                     (BuilderShapeMode)game->builder_shape_mode,
+                                     game->builder_fill_anchor_x,
+                                     game->builder_fill_anchor_y,
+                                     tile_x,
+                                     tile_y);
+        if (placed_count <= 0)
+        {
+            game_announce("Builder fill failed.", true);
+            return false;
+        }
+
+        char message[256];
+        snprintf(message, sizeof(message),
+                 "%s applied as a %s from X %d Y %d to X %d Y %d.",
+                 tile->name != NULL ? tile->name : "Tile",
+                 k_builder_shape_mode_names[game->builder_shape_mode],
+                 game->builder_fill_anchor_x,
+                 game->builder_fill_anchor_y,
+                 tile_x,
+                 tile_y);
+        game_announce(message, true);
+        if (game_tile_is_wall_like(tile))
+        {
+            game_place_builder_player_inside_wall(game,
+                                                  (BuilderShapeMode)game->builder_shape_mode,
+                                                  game->builder_fill_anchor_x,
+                                                  game->builder_fill_anchor_y,
+                                                  tile_x,
+                                                  tile_y);
+        }
+        game->builder_fill_anchor_set = false;
+        game->builder_fill_anchor_x = -1;
+        game->builder_fill_anchor_y = -1;
+        return true;
+    }
+
+    if (!world_set_tile(&game->world, tile_x, tile_y, tile_id))
+    {
+        game_announce("Builder placement failed.", true);
+        return false;
+    }
+
+    char message[192];
+    snprintf(message, sizeof(message), "%s placed at X %d Y %d.",
+             tile->name != NULL ? tile->name : "Tile", tile_x, tile_y);
+    game_announce(message, true);
+    return true;
+}
+
+static bool game_clear_builder_target_tile(Game *game)
+{
+    if (game == NULL || !game->structure_builder_active)
+    {
+        return false;
+    }
+
+    int tile_x = 0;
+    int tile_y = 0;
+    if (!game_get_builder_target_tile(game, &tile_x, &tile_y))
+    {
+        game_announce("Builder target is out of bounds.", true);
+        return false;
+    }
+
+    const TileDefinition *tile = world_get_top_tile_at(&game->world, tile_x, tile_y);
+    if (tile == NULL)
+    {
+        game_announce("Nothing to remove there.", true);
+        return false;
+    }
+
+    if (!world_clear_tile_at_layer(&game->world, tile_x, tile_y, tile->layer))
+    {
+        game_announce("Removal failed.", true);
+        return false;
+    }
+
+    char message[192];
+    snprintf(message, sizeof(message), "%s removed from X %d Y %d.",
+             tile->name != NULL ? tile->name : "Tile", tile_x, tile_y);
+    game_announce(message, true);
+    return true;
 }
 
 static bool game_tile_pickup_allowed_without_tools(const TileDefinition *tile)
@@ -978,7 +1547,7 @@ static int game_find_survival_slot_for_tile(const Inventory *inventory, TileId t
     for (int slot_index = 0; slot_index < INVENTORY_SURVIVAL_SLOT_COUNT; slot_index++)
     {
         const InventorySlot *slot = &inventory->slots[slot_index];
-        if (slot->occupied && slot->tile_id == tile_id)
+        if (slot->occupied && slot->tile_id == (int)tile_id)
         {
             return slot_index;
         }
@@ -1171,6 +1740,7 @@ static bool game_create_new_world(Game *game, GameMode mode)
     }
 
     game->world_loaded = true;
+    game->structure_builder_active = false;
     game->game_mode = mode;
     inventory_init(&game->inventory, mode);
     if (mode == GAME_MODE_SURVIVAL)
@@ -1192,8 +1762,70 @@ static bool game_create_new_world(Game *game, GameMode mode)
     game->has_prev_blocked_tile = false;
     game->prev_blocked_tile_x = -1;
     game->prev_blocked_tile_y = -1;
+    game_reset_builder_shape_state(game);
     game_announce(mode == GAME_MODE_CREATIVE ? "Creative world ready."
                                              : "Survival world ready.",
+                  false);
+    return true;
+}
+
+static bool game_create_structure_builder_world(Game *game)
+{
+    enum
+    {
+        BUILDER_WORLD_WIDTH_TILES = 96,
+        BUILDER_WORLD_HEIGHT_TILES = 64,
+    };
+
+    if (game == NULL)
+    {
+        return false;
+    }
+
+    if (game->world_loaded)
+    {
+        world_shutdown(&game->world);
+        game->world_loaded = false;
+    }
+
+    if (!world_init_flat(&game->world,
+                         BUILDER_WORLD_WIDTH_TILES,
+                         BUILDER_WORLD_HEIGHT_TILES,
+                         32,
+                         TILE_GRASS,
+                         BIOME_PLAINS,
+                         18.0f))
+    {
+        fprintf(stderr, "game: structure builder world initialization failed\n");
+        game_announce("Structure builder failed to start.", true);
+        return false;
+    }
+
+    game->world_loaded = true;
+    game->structure_builder_active = true;
+    game->game_mode = GAME_MODE_CREATIVE;
+    inventory_init(&game->inventory, GAME_MODE_CREATIVE);
+    structure_builder_config_reset(&game->structure_builder_config);
+    ui_structure_save_bind_config(&game->structure_builder_config);
+    game_apply_structure_builder_biome(game, game->structure_builder_config.builder_biome);
+
+    game->has_prev_tile = false;
+    game->tracker_category_index = 0;
+    game->tracker_object_index = 0;
+    game->facing_dir_x = 0;
+    game->facing_dir_y = 1;
+    game->auto_walk_active = false;
+    game->auto_walk_target_x = -1;
+    game->auto_walk_target_y = -1;
+    game->auto_walk_stuck_seconds = 0.0f;
+    game_reset_axe_chop(game);
+    game->pending_hotbar_tile = TILE_ID_COUNT;
+    game->pending_inventory_slot = -1;
+    game->has_prev_blocked_tile = false;
+    game->prev_blocked_tile_x = -1;
+    game->prev_blocked_tile_y = -1;
+    game_reset_builder_shape_state(game);
+    game_announce("Structure builder ready. E opens inventory. Enter places. Shift Enter toggles fill mode. Left and right bracket change shape. Backspace removes. Control Tab changes biome. Tab opens save.",
                   false);
     return true;
 }
@@ -1220,6 +1852,7 @@ static void game_init(Engine *engine, void *userdata)
     game->prev_tab = false;
     game->prev_space = false;
     game->prev_e = false;
+    game->prev_left_bracket = false;
     game->prev_right_bracket = false;
     game->prev_mouse_right = false;
     for (int i = 0; i < INVENTORY_HOTBAR_SLOT_COUNT; i++)
@@ -1243,13 +1876,22 @@ static void game_init(Engine *engine, void *userdata)
     game_reset_axe_chop(game);
     game->pending_hotbar_tile = TILE_ID_COUNT;
     game->pending_inventory_slot = -1;
+    game_reset_builder_shape_state(game);
     game->game_mode = GAME_MODE_SURVIVAL;
+    game->structure_builder_active = false;
     inventory_init(&game->inventory, GAME_MODE_SURVIVAL);
+    structure_builder_config_reset(&game->structure_builder_config);
+    ui_structure_save_bind_config(&game->structure_builder_config);
 
     game->speech_ready = speech_init();
     if (!settings_load())
     {
         fprintf(stderr, "game: settings load failed\n");
+    }
+
+    if (!audio_backend_init())
+    {
+        fprintf(stderr, "game: miniaudio backend failed to start\n");
     }
 
     if (!music_player_start_main_menu_music())
@@ -1296,6 +1938,7 @@ static void game_update(Engine *engine, void *userdata)
     const bool tab_now = engine_key_down(engine, SDL_SCANCODE_TAB);
     const bool space_now = engine_key_down(engine, SDL_SCANCODE_SPACE);
     const bool e_now = engine_key_down(engine, SDL_SCANCODE_E);
+    const bool left_bracket_now = engine_key_down(engine, SDL_SCANCODE_LEFTBRACKET);
     const bool right_bracket_now = engine_key_down(engine, SDL_SCANCODE_RIGHTBRACKET);
     bool hotbar_keys_now[INVENTORY_HOTBAR_SLOT_COUNT] = {
         engine_key_down(engine, SDL_SCANCODE_1),
@@ -1338,6 +1981,8 @@ static void game_update(Engine *engine, void *userdata)
     const bool tab_pressed = tab_now && !game->prev_tab;
     const bool space_pressed = space_now && !game->prev_space;
     const bool e_pressed = e_now && !game->prev_e;
+    const bool left_bracket_pressed =
+        left_bracket_now && !game->prev_left_bracket;
     const bool right_bracket_pressed =
         right_bracket_now && !game->prev_right_bracket;
     const bool mouse_right_pressed = mouse_right_now && !game->prev_mouse_right;
@@ -1369,6 +2014,7 @@ static void game_update(Engine *engine, void *userdata)
     game->prev_tab = tab_now;
     game->prev_space = space_now;
     game->prev_e = e_now;
+    game->prev_left_bracket = left_bracket_now;
     game->prev_right_bracket = right_bracket_now;
     game->prev_mouse_right = mouse_right_now;
     for (int i = 0; i < INVENTORY_HOTBAR_SLOT_COUNT; i++)
@@ -1406,6 +2052,20 @@ static void game_update(Engine *engine, void *userdata)
             {
                 opening_scene_start(game->speech_ready ? game_announce : NULL);
             }
+        }
+        else
+        {
+            ui_init(&game->ui, game->speech_ready ? game_announce : NULL);
+        }
+    }
+
+    if (action == UI_ACTION_START_STRUCTURE_BUILDER)
+    {
+        game_announce("Opening structure builder.", true);
+        if (game_create_structure_builder_world(game))
+        {
+            ui_show_screen(&game->ui, UI_SCREEN_WORLD,
+                           game->speech_ready ? game_announce : NULL);
         }
         else
         {
@@ -1451,6 +2111,30 @@ static void game_update(Engine *engine, void *userdata)
         }
     }
 
+    if (action == UI_ACTION_SAVE_STRUCTURE)
+    {
+        char saved_path[256];
+        char error_message[160];
+        if (structure_builder_save(&game->world, &game->structure_builder_config,
+                                   saved_path, sizeof(saved_path),
+                                   error_message, sizeof(error_message)))
+        {
+            char message[320];
+            snprintf(message, sizeof(message), "%s saved to %s.",
+                     structure_builder_save_kind_name(game->structure_builder_config.save_kind),
+                     saved_path);
+            game_announce(message, true);
+            ui_show_screen(&game->ui, UI_SCREEN_WORLD,
+                           game->speech_ready ? game_announce : NULL);
+        }
+        else
+        {
+            game_announce(error_message[0] != '\0' ? error_message
+                                                   : "Structure save failed.",
+                          true);
+        }
+    }
+
     if (e_pressed)
     {
         const UiScreen screen = ui_screen(&game->ui);
@@ -1474,6 +2158,15 @@ static void game_update(Engine *engine, void *userdata)
                            game->speech_ready ? game_announce : NULL);
             game_clear_pending_inventory_item(game);
         }
+    }
+
+    if (tab_pressed && !ctrl_now &&
+        ui_screen(&game->ui) == UI_SCREEN_WORLD &&
+        game->world_loaded &&
+        game->structure_builder_active)
+    {
+        ui_show_screen(&game->ui, UI_SCREEN_STRUCTURE_SAVE,
+                       game->speech_ready ? game_announce : NULL);
     }
 
     const UiScreen current_screen = ui_screen(&game->ui);
@@ -1576,17 +2269,53 @@ static void game_update(Engine *engine, void *userdata)
         game->facing_dir_y = move_y > 0.0f ? 1 : (move_y < 0.0f ? -1 : 0);
     }
 
+    if (game->structure_builder_active)
+    {
+        if (tab_pressed && ctrl_now)
+        {
+            game_cycle_structure_builder_biome(game, shift_now ? -1 : 1);
+        }
+        if (left_bracket_pressed)
+        {
+            game_cycle_builder_shape_mode(game, -1);
+        }
+        if (right_bracket_pressed)
+        {
+            game_cycle_builder_shape_mode(game, 1);
+        }
+        if (enter_pressed)
+        {
+            if (shift_now)
+            {
+                game_toggle_builder_fill_mode(game);
+            }
+            else
+            {
+                game_place_selected_tile_in_builder(game);
+            }
+        }
+        if (backspace_pressed)
+        {
+            game_clear_builder_target_tile(game);
+        }
+    }
+
     const bool tool_use_consumed =
-        game_update_axe_use(game, space_now, space_pressed, delta_time);
+        game->structure_builder_active ? false
+                                       : game_update_axe_use(game, space_now, space_pressed,
+                                                             delta_time);
     const bool manual_move_input = move_x != 0.0f || move_y != 0.0f;
-    bool jump_pressed = space_pressed && !tool_use_consumed;
+    bool jump_pressed = !game->structure_builder_active && space_pressed && !tool_use_consumed;
     game_apply_auto_walk(game, manual_move_input, &move_x, &move_y, &jump_pressed);
 
     const float player_x_before = game->world.player_x;
     const float player_y_before = game->world.player_y;
     world_update(&game->world, delta_time, move_x, move_y, jump_pressed);
     game_update_auto_walk_progress(game, player_x_before, player_y_before, delta_time);
-    game_try_auto_pickup_wood_near_player(game);
+    if (!game->structure_builder_active)
+    {
+        game_try_auto_pickup_wood_near_player(game);
+    }
     water_biome_audio_update(&game->world, delta_time);
 
     if (move_x != 0.0f || move_y != 0.0f)
@@ -1794,6 +2523,7 @@ static void game_shutdown(Engine *engine, void *userdata)
     music_player_shutdown();
     opening_scene_shutdown();
     water_biome_audio_shutdown();
+    audio_backend_shutdown();
     settings_save();
     speech_shutdown();
 }

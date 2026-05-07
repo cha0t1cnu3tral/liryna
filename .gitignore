@@ -1,6 +1,5 @@
 # Ignore dependencies
-third_party/prism*
-third_party/sdl*
+third_party/
 
 # Build outputs
 /build/

@@ -309,7 +309,7 @@ static SDL_FRect world_layer_rect(const World *world, int x, int y, TileLayer la
     return rect;
 }
 
-bool world_init(World *world, int width, int height, int tile_size)
+static bool world_allocate(World *world, int width, int height, int tile_size)
 {
     if (world == NULL || width <= 0 || height <= 0 || tile_size <= 0)
     {
@@ -382,6 +382,16 @@ bool world_init(World *world, int width, int height, int tile_size)
         world->structure_tiles[i] = TILE_ID_COUNT;
     }
 
+    return true;
+}
+
+bool world_init(World *world, int width, int height, int tile_size)
+{
+    if (!world_allocate(world, width, height, tile_size))
+    {
+        return false;
+    }
+
     const unsigned int seed = (unsigned int)time(NULL);
     if (!world_generate_procedural(world, seed))
     {
@@ -397,6 +407,39 @@ bool world_init(World *world, int width, int height, int tile_size)
         world->player_y = (float)(spawn_tile_y * tile_size);
     }
 
+    return true;
+}
+
+bool world_init_flat(World *world,
+                     int width,
+                     int height,
+                     int tile_size,
+                     TileId ground_tile,
+                     BiomeType biome_type,
+                     float temperature_c)
+{
+    if (!world_allocate(world, width, height, tile_size))
+    {
+        return false;
+    }
+
+    const TileDefinition *ground = tiles_get_definition(ground_tile);
+    if (ground == NULL || ground->layer != TILE_LAYER_GROUND)
+    {
+        world_shutdown(world);
+        return false;
+    }
+
+    const int tile_count = width * height;
+    for (int i = 0; i < tile_count; i++)
+    {
+        world->ground_tiles[i] = ground_tile;
+        world->biomes[i] = biome_type;
+        world->temperatures_c[i] = temperature_c;
+    }
+
+    world->player_x = (float)((width / 2) * tile_size);
+    world->player_y = (float)((height / 2) * tile_size);
     return true;
 }
 

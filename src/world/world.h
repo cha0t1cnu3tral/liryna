@@ -47,6 +47,13 @@ bool world_set_tile_at_layer(World *world, int tile_x, int tile_y, TileLayer lay
 bool world_set_tile(World *world, int tile_x, int tile_y, TileId tile_id);
 bool world_clear_tile_at_layer(World *world, int tile_x, int tile_y, TileLayer layer);
 bool world_init(World *world, int width, int height, int tile_size);
+bool world_init_flat(World *world,
+                     int width,
+                     int height,
+                     int tile_size,
+                     TileId ground_tile,
+                     BiomeType biome_type,
+                     float temperature_c);
 void world_update(World *world, float delta_time, float move_x, float move_y, bool jump_pressed);
 void world_render(World *world, SDL_Renderer *renderer);
 bool world_get_player_environment(const World *world,

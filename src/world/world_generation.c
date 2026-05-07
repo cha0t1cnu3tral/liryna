@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 #include "biome_tile_sets.h"
+#include "structure_generation.h"
 
 static int world_generation_index_from_xy(const World *world, int x, int y)
 {
@@ -744,6 +745,7 @@ bool world_generate_procedural(World *world, unsigned int seed)
         }
     }
 
+    world_generation_apply_saved_structures(world, seed + 5003U);
     return true;
 }
 

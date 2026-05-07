@@ -43,7 +43,9 @@ static bool ui_is_external_action(UiAction action)
 {
     return action == UI_ACTION_START_WORLD_SURVIVAL ||
            action == UI_ACTION_START_WORLD_CREATIVE ||
+           action == UI_ACTION_START_STRUCTURE_BUILDER ||
            action == UI_ACTION_SELECT_CREATIVE_TILE ||
+           action == UI_ACTION_SAVE_STRUCTURE ||
            action == UI_ACTION_SELECT_SURVIVAL_TILE ||
            action == UI_ACTION_EXIT;
 }
@@ -989,8 +991,10 @@ static bool ui_handle_internal_action(UiState *ui, UiAction selected_action,
     case UI_ACTION_NONE:
     case UI_ACTION_START_WORLD_SURVIVAL:
     case UI_ACTION_START_WORLD_CREATIVE:
+    case UI_ACTION_START_STRUCTURE_BUILDER:
     case UI_ACTION_SELECT_CREATIVE_TILE:
     case UI_ACTION_SELECT_SURVIVAL_TILE:
+    case UI_ACTION_SAVE_STRUCTURE:
     case UI_ACTION_EXIT:
     default:
         return false;
@@ -1272,6 +1276,17 @@ void ui_show_screen(UiState *ui, UiScreen screen, UiAnnounceFn announce)
             return;
         }
 
+        if (ui->screen == UI_SCREEN_STRUCTURE_SAVE)
+        {
+            if (ui->screen_stack_count > 0)
+            {
+                ui->screen_stack_count--;
+            }
+            ui->screen = UI_SCREEN_WORLD;
+            ui_reset_focus(ui);
+            return;
+        }
+
         if (ui->screen_stack_count < (int)(sizeof(ui->screen_stack) / sizeof(ui->screen_stack[0])))
         {
             ui->screen_stack[ui->screen_stack_count] = ui->screen;
@@ -1280,6 +1295,15 @@ void ui_show_screen(UiState *ui, UiScreen screen, UiAnnounceFn announce)
         ui->screen = UI_SCREEN_WORLD;
         ui_reset_focus(ui);
         return;
+    }
+
+    if (ui->screen == UI_SCREEN_WORLD)
+    {
+        if (ui->screen_stack_count < (int)(sizeof(ui->screen_stack) / sizeof(ui->screen_stack[0])))
+        {
+            ui->screen_stack[ui->screen_stack_count] = ui->screen;
+            ui->screen_stack_count++;
+        }
     }
 
     ui_set_screen_internal(ui, screen, announce);
