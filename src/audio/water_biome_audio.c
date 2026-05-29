@@ -24,6 +24,7 @@ typedef struct BiomeAudioTrack
     bool is_swim_track;
     bool footstep_is_cold;
     bool footstep_is_ship_piece;
+    bool footstep_is_wood_floor;
     ma_sound sound;
     float volume;
     float pan;
@@ -43,10 +44,19 @@ static unsigned int g_rng_state = 0xA341316Cu;
 static bool g_have_previous_player_position = false;
 static float g_previous_player_x = 0.0f;
 static float g_previous_player_y = 0.0f;
+static ma_sound g_tree_cutting_sound;
+static bool g_tree_cutting_initialized = false;
+static bool g_tree_cutting_active = false;
+static bool g_tree_cutting_playing = false;
+static float g_tree_cutting_volume = 0.0f;
+static float g_tree_cutting_pitch = 1.0f;
+static float g_tree_cutting_pitch_target = 1.0f;
+static float g_tree_cutting_pitch_timer = 0.0f;
 
 static bool is_water_biome(BiomeType biome_type);
 static bool is_tundra_biome(BiomeType biome_type);
 static bool is_cold_ground_tile(TileId tile_id);
+static bool is_wood_floor_tile(const TileDefinition *tile);
 
 static BiomeAudioTrack g_tracks[] = {
     {
@@ -95,9 +105,18 @@ static BiomeAudioTrack g_tracks[] = {
         .drift_current = 1.0f,
         .drift_target = 1.0f,
     },
+    {
+        .relative_path = "assets/sfx/dragon-studio-footsteps-on-wood-397989.mp3",
+        .peak_volume = 850.0f,
+        .is_footstep_track = true,
+        .footstep_is_wood_floor = true,
+        .drift_current = 1.0f,
+        .drift_target = 1.0f,
+    },
 };
 
 static const size_t k_track_count = sizeof(g_tracks) / sizeof(g_tracks[0]);
+static const char *const k_tree_cutting_path = "assets/sfx/treecutting.wav";
 
 static bool try_path(char *out_path, size_t out_size, const char *candidate)
 {
@@ -287,6 +306,34 @@ static bool is_cold_ground_tile(TileId tile_id)
     default:
         return false;
     }
+}
+
+static bool tile_name_contains(const TileDefinition *tile, const char *needle)
+{
+    return tile != NULL && tile->name != NULL && needle != NULL &&
+           strstr(tile->name, needle) != NULL;
+}
+
+static bool is_wood_floor_tile(const TileDefinition *tile)
+{
+    if (tile == NULL || tile->layer != TILE_LAYER_FLOOR || !tile->walkable)
+    {
+        return false;
+    }
+
+    switch (tile->id)
+    {
+    case TILE_WOODFOUNDATION:
+    case TILE_PIER:
+        return true;
+    default:
+        break;
+    }
+
+    return tile_name_contains(tile, "Wood") ||
+           tile_name_contains(tile, "Wooden") ||
+           tile_name_contains(tile, "Plank") ||
+           tile_name_contains(tile, "Log");
 }
 
 static bool find_nearest_matching_tile(const World *world,
@@ -484,6 +531,109 @@ static void stop_all_tracks(void)
     g_tracks_playing = false;
 }
 
+static bool init_tree_cutting_sound(void)
+{
+    ma_engine *engine = audio_backend_engine();
+    if (engine == NULL)
+    {
+        return false;
+    }
+
+    char track_path[1024];
+    if (!resolve_track_path(k_tree_cutting_path, track_path, sizeof(track_path)))
+    {
+        fprintf(stderr, "biome_audio: failed to locate %s\n", k_tree_cutting_path);
+        return false;
+    }
+
+    const ma_uint32 flags = MA_SOUND_FLAG_NO_SPATIALIZATION;
+    const ma_result result =
+        ma_sound_init_from_file(engine, track_path, flags, NULL, NULL, &g_tree_cutting_sound);
+    if (result != MA_SUCCESS)
+    {
+        fprintf(stderr, "biome_audio: failed to load %s: %s\n",
+                track_path, ma_result_description(result));
+        return false;
+    }
+
+    ma_sound_set_looping(&g_tree_cutting_sound, MA_TRUE);
+    ma_sound_set_volume(&g_tree_cutting_sound, 0.0f);
+    ma_sound_set_pan(&g_tree_cutting_sound, 0.0f);
+    ma_sound_set_pitch(&g_tree_cutting_sound, 1.0f);
+
+    g_tree_cutting_initialized = true;
+    g_tree_cutting_active = false;
+    g_tree_cutting_playing = false;
+    g_tree_cutting_volume = 0.0f;
+    g_tree_cutting_pitch = 1.0f;
+    g_tree_cutting_pitch_target = 1.0f;
+    g_tree_cutting_pitch_timer = 0.0f;
+    return true;
+}
+
+static void update_tree_cutting_sound(float delta_time)
+{
+    if (!g_audio_started || !g_tree_cutting_initialized)
+    {
+        return;
+    }
+
+    const float target_volume =
+        g_tree_cutting_active
+            ? SDL_clamp((float)settings_effective_ambience_mci_volume(760) / 1000.0f, 0.0f, 1.0f)
+            : 0.0f;
+
+    if (g_tree_cutting_active && !g_tree_cutting_playing)
+    {
+        ma_sound_seek_to_pcm_frame(&g_tree_cutting_sound, 0);
+        if (ma_sound_start(&g_tree_cutting_sound) == MA_SUCCESS)
+        {
+            g_tree_cutting_playing = true;
+        }
+        else
+        {
+            fprintf(stderr, "biome_audio: failed to start %s\n", k_tree_cutting_path);
+        }
+    }
+
+    const float fade_rate = g_tree_cutting_active ? 7.5f : 11.0f;
+    const float fade_step = SDL_clamp(delta_time * fade_rate, 0.0f, 1.0f);
+    g_tree_cutting_volume += (target_volume - g_tree_cutting_volume) * fade_step;
+
+    if (g_tree_cutting_active)
+    {
+        g_tree_cutting_pitch_timer -= delta_time;
+        if (g_tree_cutting_pitch_timer <= 0.0f)
+        {
+            g_tree_cutting_pitch_target = 0.94f + (0.10f * random_unit());
+            g_tree_cutting_pitch_timer = 0.35f + (0.35f * random_unit());
+        }
+    }
+    else
+    {
+        g_tree_cutting_pitch_target = 1.0f;
+        g_tree_cutting_pitch_timer = 0.0f;
+    }
+
+    const float pitch_step = SDL_clamp(delta_time * 5.0f, 0.0f, 1.0f);
+    g_tree_cutting_pitch +=
+        (g_tree_cutting_pitch_target - g_tree_cutting_pitch) * pitch_step;
+
+    ma_sound_set_volume(&g_tree_cutting_sound, g_tree_cutting_volume);
+    ma_sound_set_pitch(&g_tree_cutting_sound, g_tree_cutting_pitch);
+
+    if (!g_tree_cutting_active && g_tree_cutting_playing && g_tree_cutting_volume < 0.004f)
+    {
+        ma_sound_stop(&g_tree_cutting_sound);
+        ma_sound_seek_to_pcm_frame(&g_tree_cutting_sound, 0);
+        g_tree_cutting_playing = false;
+        g_tree_cutting_volume = 0.0f;
+        ma_sound_set_volume(&g_tree_cutting_sound, 0.0f);
+        ma_sound_set_pitch(&g_tree_cutting_sound, 1.0f);
+        g_tree_cutting_pitch = 1.0f;
+    }
+}
+
 bool water_biome_audio_init(void)
 {
     if (g_audio_started)
@@ -501,6 +651,9 @@ bool water_biome_audio_init(void)
         }
         initialized_track_count++;
     }
+
+    g_tree_cutting_initialized = false;
+    (void)init_tree_cutting_sound();
 
     if (initialized_track_count == 0)
     {
@@ -524,6 +677,7 @@ void water_biome_audio_update(const World *world, float delta_time)
     }
     const float update_dt = g_update_timer;
     g_update_timer = 0.0f;
+    update_tree_cutting_sound(update_dt);
 
     if (!g_audio_started || world == NULL || world->ground_tiles == NULL || world->biomes == NULL ||
         world->width <= 0 || world->height <= 0 || world->tile_size <= 0)
@@ -547,6 +701,7 @@ void water_biome_audio_update(const World *world, float delta_time)
     bool player_on_ground_layer = false;
     bool player_on_cold_ground = false;
     bool player_on_ship_piece = false;
+    bool player_on_wood_floor = false;
     bool player_swimming = false;
     if (player_in_bounds)
     {
@@ -561,6 +716,7 @@ void water_biome_audio_update(const World *world, float delta_time)
                 player_on_ground_layer = true;
                 player_on_cold_ground = is_cold_ground_tile(support_tile->id);
                 player_on_ship_piece = support_tile->id == TILE_SHIPPIECE;
+                player_on_wood_floor = is_wood_floor_tile(support_tile);
             }
         }
     }
@@ -617,13 +773,19 @@ void water_biome_audio_update(const World *world, float delta_time)
                 {
                     track_matches_current_surface = player_on_ship_piece;
                 }
+                else if (track->footstep_is_wood_floor)
+                {
+                    track_matches_current_surface = player_on_wood_floor;
+                }
                 else if (track->footstep_is_cold)
                 {
                     track_matches_current_surface = player_on_cold_ground;
                 }
                 else
                 {
-                    track_matches_current_surface = !player_on_cold_ground && !player_on_ship_piece;
+                    track_matches_current_surface = !player_on_cold_ground &&
+                                                    !player_on_ship_piece &&
+                                                    !player_on_wood_floor;
                 }
             }
             if (!track_matches_current_surface || movement_speed < 2.0f)
@@ -679,6 +841,11 @@ void water_biome_audio_update(const World *world, float delta_time)
     }
 }
 
+void water_biome_audio_set_tree_cutting(bool active)
+{
+    g_tree_cutting_active = active;
+}
+
 void water_biome_audio_shutdown(void)
 {
     if (!g_audio_started)
@@ -705,6 +872,13 @@ void water_biome_audio_shutdown(void)
         g_tracks[i].initialized = false;
     }
 
+    if (g_tree_cutting_initialized)
+    {
+        ma_sound_stop(&g_tree_cutting_sound);
+        ma_sound_uninit(&g_tree_cutting_sound);
+        g_tree_cutting_initialized = false;
+    }
+
     g_audio_started = false;
     g_tracks_playing = false;
     g_update_timer = 0.0f;
@@ -712,4 +886,10 @@ void water_biome_audio_shutdown(void)
     g_have_previous_player_position = false;
     g_previous_player_x = 0.0f;
     g_previous_player_y = 0.0f;
+    g_tree_cutting_active = false;
+    g_tree_cutting_playing = false;
+    g_tree_cutting_volume = 0.0f;
+    g_tree_cutting_pitch = 1.0f;
+    g_tree_cutting_pitch_target = 1.0f;
+    g_tree_cutting_pitch_timer = 0.0f;
 }

@@ -17,6 +17,13 @@
 #include "ui/screens/screen_registry.h"
 #include "world/world.h"
 
+typedef struct BuilderCopyCell
+{
+    TileId floor_tile_id;
+    TileId object_tile_id;
+    TileId structure_tile_id;
+} BuilderCopyCell;
+
 typedef struct Game
 {
     UiState ui;
@@ -65,6 +72,12 @@ typedef struct Game
     int builder_fill_anchor_x;
     int builder_fill_anchor_y;
     int builder_shape_mode;
+    bool builder_copy_anchor_set;
+    int builder_copy_anchor_x;
+    int builder_copy_anchor_y;
+    BuilderCopyCell *builder_copy_cells;
+    int builder_copy_width;
+    int builder_copy_height;
     bool auto_walk_active;
     int auto_walk_target_x;
     int auto_walk_target_y;
@@ -80,8 +93,11 @@ typedef struct Game
 typedef enum BuilderShapeMode
 {
     BUILDER_SHAPE_RECT_FILL = 0,
+    BUILDER_SHAPE_SQUARE_FILL,
     BUILDER_SHAPE_RECT_OUTLINE,
     BUILDER_SHAPE_LINE,
+    BUILDER_SHAPE_COPY,
+    BUILDER_SHAPE_PASTE,
     BUILDER_SHAPE_COUNT
 } BuilderShapeMode;
 
@@ -102,8 +118,11 @@ static const int k_tracker_category_count =
 
 static const char *const k_builder_shape_mode_names[BUILDER_SHAPE_COUNT] = {
     "filled rectangle",
+    "filled square",
     "rectangle outline",
     "line",
+    "copy",
+    "paste",
 };
 
 static const float k_axe_chop_required_seconds = 3.0f;
@@ -114,6 +133,7 @@ static const int k_tree_wood_auto_pickup_max = 15;
 
 static void game_clear_pending_inventory_item(Game *game);
 static void game_reset_builder_shape_state(Game *game);
+static void game_clear_builder_copy_buffer(Game *game);
 static bool game_tile_is_wall_like(const TileDefinition *tile);
 static void game_apply_structure_builder_biome(Game *game, BiomeType biome_type);
 
@@ -197,6 +217,9 @@ static void game_reset_builder_shape_state(Game *game)
     game->builder_fill_anchor_x = -1;
     game->builder_fill_anchor_y = -1;
     game->builder_shape_mode = BUILDER_SHAPE_RECT_FILL;
+    game->builder_copy_anchor_set = false;
+    game->builder_copy_anchor_x = -1;
+    game->builder_copy_anchor_y = -1;
 }
 
 static bool game_get_builder_selected_tile(const Game *game,
@@ -232,6 +255,19 @@ static int game_builder_line_steps(int start_x, int start_y, int end_x, int end_
     return dx > dy ? dx : dy;
 }
 
+static int game_builder_direction(int start, int end)
+{
+    if (end > start)
+    {
+        return 1;
+    }
+    if (end < start)
+    {
+        return -1;
+    }
+    return 1;
+}
+
 static int game_apply_builder_shape(World *world,
                                     TileId tile_id,
                                     BuilderShapeMode shape_mode,
@@ -265,6 +301,25 @@ static int game_apply_builder_shape(World *world,
             }
         }
         break;
+    case BUILDER_SHAPE_SQUARE_FILL:
+    {
+        const int side = game_builder_line_steps(start_x, start_y, end_x, end_y);
+        const int dir_x = game_builder_direction(start_x, end_x);
+        const int dir_y = game_builder_direction(start_y, end_y);
+        for (int y_offset = 0; y_offset <= side; y_offset++)
+        {
+            for (int x_offset = 0; x_offset <= side; x_offset++)
+            {
+                const int x = start_x + (x_offset * dir_x);
+                const int y = start_y + (y_offset * dir_y);
+                if (world_set_tile(world, x, y, tile_id))
+                {
+                    placed_count++;
+                }
+            }
+        }
+        break;
+    }
     case BUILDER_SHAPE_RECT_OUTLINE:
         for (int y = min_y; y <= max_y; y++)
         {
@@ -306,12 +361,211 @@ static int game_apply_builder_shape(World *world,
         }
         break;
     }
+    case BUILDER_SHAPE_COPY:
+    case BUILDER_SHAPE_PASTE:
     case BUILDER_SHAPE_COUNT:
     default:
         break;
     }
 
     return placed_count;
+}
+
+static BuilderCopyCell *game_builder_copy_cell(Game *game, int x, int y)
+{
+    if (game == NULL || game->builder_copy_cells == NULL ||
+        x < 0 || y < 0 || x >= game->builder_copy_width || y >= game->builder_copy_height)
+    {
+        return NULL;
+    }
+
+    return &game->builder_copy_cells[(y * game->builder_copy_width) + x];
+}
+
+static const BuilderCopyCell *game_builder_copy_cell_const(const Game *game, int x, int y)
+{
+    if (game == NULL || game->builder_copy_cells == NULL ||
+        x < 0 || y < 0 || x >= game->builder_copy_width || y >= game->builder_copy_height)
+    {
+        return NULL;
+    }
+
+    return &game->builder_copy_cells[(y * game->builder_copy_width) + x];
+}
+
+static void game_clear_builder_copy_buffer(Game *game)
+{
+    if (game == NULL)
+    {
+        return;
+    }
+
+    free(game->builder_copy_cells);
+    game->builder_copy_cells = NULL;
+    game->builder_copy_width = 0;
+    game->builder_copy_height = 0;
+    game->builder_copy_anchor_set = false;
+    game->builder_copy_anchor_x = -1;
+    game->builder_copy_anchor_y = -1;
+}
+
+static bool game_copy_builder_area(Game *game)
+{
+    if (game == NULL || !game->structure_builder_active)
+    {
+        return false;
+    }
+
+    int tile_x = 0;
+    int tile_y = 0;
+    if (!game_get_builder_target_tile(game, &tile_x, &tile_y))
+    {
+        game_announce("Copy target is out of bounds.", true);
+        return false;
+    }
+
+    if (!game->builder_copy_anchor_set)
+    {
+        game->builder_copy_anchor_set = true;
+        game->builder_copy_anchor_x = tile_x;
+        game->builder_copy_anchor_y = tile_y;
+
+        char message[192];
+        snprintf(message, sizeof(message),
+                 "Copy first corner set at X %d Y %d. Move to the second corner and press Enter.",
+                 tile_x, tile_y);
+        game_announce(message, true);
+        return true;
+    }
+
+    const int min_x = game->builder_copy_anchor_x < tile_x ? game->builder_copy_anchor_x : tile_x;
+    const int max_x = game->builder_copy_anchor_x > tile_x ? game->builder_copy_anchor_x : tile_x;
+    const int min_y = game->builder_copy_anchor_y < tile_y ? game->builder_copy_anchor_y : tile_y;
+    const int max_y = game->builder_copy_anchor_y > tile_y ? game->builder_copy_anchor_y : tile_y;
+    const int width = max_x - min_x + 1;
+    const int height = max_y - min_y + 1;
+
+    BuilderCopyCell *cells = (BuilderCopyCell *)calloc((size_t)width * (size_t)height,
+                                                       sizeof(*cells));
+    if (cells == NULL)
+    {
+        game_announce("Copy failed. Out of memory.", true);
+        return false;
+    }
+
+    int copied_layer_count = 0;
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            BuilderCopyCell *cell = &cells[(y * width) + x];
+            const int world_x = min_x + x;
+            const int world_y = min_y + y;
+            cell->floor_tile_id =
+                world_get_tile_id_at_layer(&game->world, world_x, world_y, TILE_LAYER_FLOOR);
+            cell->object_tile_id =
+                world_get_tile_id_at_layer(&game->world, world_x, world_y, TILE_LAYER_OBJECT);
+            cell->structure_tile_id =
+                world_get_tile_id_at_layer(&game->world, world_x, world_y, TILE_LAYER_STRUCTURE);
+
+            if (cell->floor_tile_id != TILE_ID_COUNT ||
+                cell->object_tile_id != TILE_ID_COUNT ||
+                cell->structure_tile_id != TILE_ID_COUNT)
+            {
+                copied_layer_count++;
+            }
+        }
+    }
+
+    free(game->builder_copy_cells);
+    game->builder_copy_cells = cells;
+    game->builder_copy_width = width;
+    game->builder_copy_height = height;
+    game->builder_copy_anchor_set = false;
+    game->builder_copy_anchor_x = -1;
+    game->builder_copy_anchor_y = -1;
+
+    char message[224];
+    snprintf(message, sizeof(message),
+             "Copied %d by %d area with %d built cells. Biome flooring was skipped.",
+             width, height, copied_layer_count);
+    game_announce(message, true);
+    return true;
+}
+
+static bool game_paste_builder_area(Game *game)
+{
+    if (game == NULL || !game->structure_builder_active)
+    {
+        return false;
+    }
+
+    if (game->builder_copy_cells == NULL ||
+        game->builder_copy_width <= 0 || game->builder_copy_height <= 0)
+    {
+        game_announce("Nothing copied yet. Use copy first.", true);
+        return false;
+    }
+
+    int target_x = 0;
+    int target_y = 0;
+    if (!game_get_builder_target_tile(game, &target_x, &target_y))
+    {
+        game_announce("Paste target is out of bounds.", true);
+        return false;
+    }
+
+    const int max_x = target_x + game->builder_copy_width - 1;
+    const int max_y = target_y + game->builder_copy_height - 1;
+    if (!world_is_in_bounds(&game->world, target_x, target_y) ||
+        !world_is_in_bounds(&game->world, max_x, max_y))
+    {
+        game_announce("Paste area is out of bounds.", true);
+        return false;
+    }
+
+    int pasted_layer_count = 0;
+    for (int y = 0; y < game->builder_copy_height; y++)
+    {
+        for (int x = 0; x < game->builder_copy_width; x++)
+        {
+            const BuilderCopyCell *cell = game_builder_copy_cell_const(game, x, y);
+            if (cell == NULL)
+            {
+                continue;
+            }
+
+            const int world_x = target_x + x;
+            const int world_y = target_y + y;
+            world_set_tile_at_layer(&game->world, world_x, world_y, TILE_LAYER_FLOOR,
+                                    cell->floor_tile_id);
+            world_set_tile_at_layer(&game->world, world_x, world_y, TILE_LAYER_OBJECT,
+                                    cell->object_tile_id);
+            world_set_tile_at_layer(&game->world, world_x, world_y, TILE_LAYER_STRUCTURE,
+                                    cell->structure_tile_id);
+
+            if (cell->floor_tile_id != TILE_ID_COUNT)
+            {
+                pasted_layer_count++;
+            }
+            if (cell->object_tile_id != TILE_ID_COUNT)
+            {
+                pasted_layer_count++;
+            }
+            if (cell->structure_tile_id != TILE_ID_COUNT)
+            {
+                pasted_layer_count++;
+            }
+        }
+    }
+
+    char message[224];
+    snprintf(message, sizeof(message),
+             "Pasted %d by %d copy at X %d Y %d with %d layers.",
+             game->builder_copy_width, game->builder_copy_height,
+             target_x, target_y, pasted_layer_count);
+    game_announce(message, true);
+    return true;
 }
 
 static bool game_find_walkable_builder_tile(const World *world,
@@ -546,9 +800,11 @@ static void game_cycle_builder_shape_mode(Game *game, int direction)
         next_mode -= BUILDER_SHAPE_COUNT;
     }
     game->builder_shape_mode = next_mode;
+    game->builder_fill_anchor_set = false;
+    game->builder_copy_anchor_set = false;
 
     char message[192];
-    snprintf(message, sizeof(message), "Builder shape set to %s.",
+    snprintf(message, sizeof(message), "Builder tool set to %s.",
              k_builder_shape_mode_names[game->builder_shape_mode]);
     game_announce(message, true);
 }
@@ -569,7 +825,7 @@ static void game_toggle_builder_fill_mode(Game *game)
     {
         char message[256];
         snprintf(message, sizeof(message),
-                 "Builder fill mode on. Shape: %s. Press Enter to set the first corner, then Enter again to apply. Use left and right bracket to change shape.",
+                 "Builder fill mode on. Tool: %s. Press Enter to set the first point, then Enter again to apply. Use left and right bracket to change tool.",
                  k_builder_shape_mode_names[game->builder_shape_mode]);
         game_announce(message, true);
     }
@@ -584,6 +840,16 @@ static bool game_place_selected_tile_in_builder(Game *game)
     if (game == NULL || !game->structure_builder_active)
     {
         return false;
+    }
+
+    if (game->builder_shape_mode == BUILDER_SHAPE_COPY)
+    {
+        return game_copy_builder_area(game);
+    }
+
+    if (game->builder_shape_mode == BUILDER_SHAPE_PASTE)
+    {
+        return game_paste_builder_area(game);
     }
 
     TileId tile_id = TILE_ID_COUNT;
@@ -1033,6 +1299,7 @@ static void game_reset_axe_chop(Game *game)
     game->axe_target_x = -1;
     game->axe_target_y = -1;
     game->axe_chop_seconds = 0.0f;
+    water_biome_audio_set_tree_cutting(false);
 }
 
 static void game_complete_tree_chop(Game *game, int tree_x, int tree_y)
@@ -1110,6 +1377,7 @@ static bool game_update_axe_use(Game *game, bool use_tool_down, bool use_tool_pr
         game_announce("Swinging axe. Hold space for 3 seconds.", true);
     }
 
+    water_biome_audio_set_tree_cutting(true);
     game->axe_chop_seconds += delta_time;
     if (game->axe_chop_seconds >= k_axe_chop_required_seconds)
     {
@@ -1731,6 +1999,7 @@ static bool game_create_new_world(Game *game, GameMode mode)
         world_shutdown(&game->world);
         game->world_loaded = false;
     }
+    game_clear_builder_copy_buffer(game);
 
     if (!world_init(&game->world, WORLD_WIDTH_TILES, WORLD_HEIGHT_TILES, 32))
     {
@@ -1787,6 +2056,7 @@ static bool game_create_structure_builder_world(Game *game)
         world_shutdown(&game->world);
         game->world_loaded = false;
     }
+    game_clear_builder_copy_buffer(game);
 
     if (!world_init_flat(&game->world,
                          BUILDER_WORLD_WIDTH_TILES,
@@ -1825,7 +2095,7 @@ static bool game_create_structure_builder_world(Game *game)
     game->prev_blocked_tile_x = -1;
     game->prev_blocked_tile_y = -1;
     game_reset_builder_shape_state(game);
-    game_announce("Structure builder ready. E opens inventory. Enter places. Shift Enter toggles fill mode. Left and right bracket change shape. Backspace removes. Control Tab changes biome. Tab opens save.",
+    game_announce("Structure builder ready. E opens inventory. Enter uses the selected builder tool. Left and right bracket change tool. Copy uses two Enter points. Paste uses Enter. Shift Enter toggles fill mode for shape tools. Backspace removes. Control Tab changes biome. Tab opens save.",
                   false);
     return true;
 }
@@ -1876,6 +2146,9 @@ static void game_init(Engine *engine, void *userdata)
     game_reset_axe_chop(game);
     game->pending_hotbar_tile = TILE_ID_COUNT;
     game->pending_inventory_slot = -1;
+    game->builder_copy_cells = NULL;
+    game->builder_copy_width = 0;
+    game->builder_copy_height = 0;
     game_reset_builder_shape_state(game);
     game->game_mode = GAME_MODE_SURVIVAL;
     game->structure_builder_active = false;
@@ -2519,6 +2792,7 @@ static void game_shutdown(Engine *engine, void *userdata)
         world_shutdown(&game->world);
         game->world_loaded = false;
     }
+    game_clear_builder_copy_buffer(game);
 
     music_player_shutdown();
     opening_scene_shutdown();
