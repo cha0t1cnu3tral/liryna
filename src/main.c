@@ -5,6 +5,7 @@
 
 #include "engine.h"
 #include "audio_backend.h"
+#include "dog.h"
 #include "inventory.h"
 #include "music_player.h"
 #include "opening_scene.h"
@@ -236,6 +237,14 @@ static void game_announce_cursor_tile(Game *game, bool interrupt)
         game->cursor_tile_y == player_tile_y)
     {
         game_announce("Player.", interrupt);
+        return;
+    }
+
+    char dog_message[192];
+    if (dog_system_describe_at(&game->world, game->cursor_tile_x, game->cursor_tile_y,
+                               dog_message, sizeof(dog_message)))
+    {
+        game_announce(dog_message, interrupt);
         return;
     }
 
@@ -1626,6 +1635,9 @@ static void game_place_opening_wreckage(Game *game)
     game_set_world_tile_if_in_bounds(&game->world, spawn_x + 2, spawn_y, TILE_PICKAXE);
     game_set_world_tile_if_in_bounds(&game->world, spawn_x + 1, spawn_y + 1, TILE_READER);
     game_set_world_tile_if_in_bounds(&game->world, spawn_x, spawn_y + 1, TILE_RADIO);
+    game_set_world_tile_if_in_bounds(&game->world, spawn_x - 1, spawn_y + 1, TILE_DOG_WHISTLE);
+    game_set_world_tile_if_in_bounds(&game->world, spawn_x - 2, spawn_y + 1, TILE_DOG_FOOD);
+    game_set_world_tile_if_in_bounds(&game->world, spawn_x - 2, spawn_y, TILE_DOG_FOOD);
 }
 
 static void game_announce_blocked_feature_ahead(Game *game, int move_dir_x, int move_dir_y)
@@ -2216,6 +2228,7 @@ static bool game_create_new_world(Game *game, GameMode mode)
         game->world_loaded = false;
     }
     game_clear_builder_copy_buffer(game);
+    dog_system_reset();
 
     if (!world_init(&game->world, WORLD_WIDTH_TILES, WORLD_HEIGHT_TILES, 32))
     {
@@ -2231,6 +2244,11 @@ static bool game_create_new_world(Game *game, GameMode mode)
     if (mode == GAME_MODE_SURVIVAL)
     {
         game_place_opening_wreckage(game);
+    }
+    const int generated_dogs = dog_system_populate_world(&game->world);
+    if (generated_dogs <= 0)
+    {
+        fprintf(stderr, "game: world generation placed no dogs\n");
     }
     game->has_prev_tile = false;
     game->tracker_category_index = 0;
@@ -2274,6 +2292,7 @@ static bool game_create_structure_builder_world(Game *game)
         game->world_loaded = false;
     }
     game_clear_builder_copy_buffer(game);
+    dog_system_reset();
 
     if (!world_init_flat(&game->world,
                          BUILDER_WORLD_WIDTH_TILES,
@@ -2416,6 +2435,10 @@ static void game_init(Engine *engine, void *userdata)
     if (!audio_backend_init())
     {
         fprintf(stderr, "game: miniaudio backend failed to start\n");
+    }
+    if (!dog_system_init())
+    {
+        fprintf(stderr, "game: dog audio failed to start\n");
     }
 
     if (!music_player_start_main_menu_music())
@@ -2897,6 +2920,44 @@ static void game_update(Engine *engine, void *userdata)
             game_clear_builder_target_tile(game);
         }
     }
+    else if (enter_pressed &&
+             dog_system_item_has_action((TileId)game->inventory.selected_tile))
+    {
+        if (game->game_mode == GAME_MODE_SURVIVAL &&
+            game->inventory.selected_tile == TILE_DOG_FOOD &&
+            inventory_tile_count(&game->inventory, TILE_DOG_FOOD) <= 0)
+        {
+            game_announce("You do not have Dog Food.", true);
+        }
+        else
+        {
+            int player_tile_x = 0;
+            int player_tile_y = 0;
+            char message[192];
+            bool consumed = false;
+            if (game_get_player_tile_position(game, &player_tile_x, &player_tile_y) &&
+                dog_system_use_item(&game->world,
+                                    (TileId)game->inventory.selected_tile,
+                                    player_tile_x,
+                                    player_tile_y,
+                                    game->facing_dir_x,
+                                    game->facing_dir_y,
+                                    message,
+                                    sizeof(message),
+                                    &consumed))
+            {
+                if (consumed && game->game_mode == GAME_MODE_SURVIVAL &&
+                    !inventory_remove_survival(&game->inventory,
+                                               game->inventory.selected_tile,
+                                               1))
+                {
+                    game_announce("You do not have that item.", true);
+                    return;
+                }
+                game_announce(message, true);
+            }
+        }
+    }
 
     const bool tool_use_consumed =
         game->structure_builder_active ? false
@@ -2909,6 +2970,7 @@ static void game_update(Engine *engine, void *userdata)
     const float player_x_before = game->world.player_x;
     const float player_y_before = game->world.player_y;
     world_update(&game->world, delta_time, move_x, move_y, jump_pressed);
+    dog_system_update(&game->world, delta_time);
     game_update_auto_walk_progress(game, player_x_before, player_y_before, delta_time);
     if (!game->structure_builder_active)
     {
@@ -3095,6 +3157,8 @@ static void game_render(Engine *engine, void *userdata)
     if (ui_screen(&game->ui) == UI_SCREEN_WORLD && game->world_loaded)
     {
         world_render(&game->world, renderer);
+        dog_system_render(&game->world, renderer);
+        world_render_player(&game->world, renderer);
         return;
     }
 
@@ -3124,6 +3188,7 @@ static void game_shutdown(Engine *engine, void *userdata)
     music_player_shutdown();
     opening_scene_shutdown();
     water_biome_audio_shutdown();
+    dog_system_shutdown();
     audio_backend_shutdown();
     settings_save();
     speech_shutdown();

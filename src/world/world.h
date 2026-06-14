@@ -56,6 +56,7 @@ bool world_init_flat(World *world,
                      float temperature_c);
 void world_update(World *world, float delta_time, float move_x, float move_y, bool jump_pressed);
 void world_render(World *world, SDL_Renderer *renderer);
+void world_render_player(const World *world, SDL_Renderer *renderer);
 bool world_get_player_environment(const World *world,
                                   int *tile_x,
                                   int *tile_y,

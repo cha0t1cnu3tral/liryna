@@ -57,6 +57,34 @@ bool inventory_add_survival(Inventory *inventory, int tile_id, int count)
     return false;
 }
 
+bool inventory_remove_survival(Inventory *inventory, int tile_id, int count)
+{
+    if (inventory == NULL || inventory->mode != GAME_MODE_SURVIVAL ||
+        tile_id < 0 || tile_id >= TILE_ID_COUNT || count <= 0)
+    {
+        return false;
+    }
+
+    for (int i = 0; i < INVENTORY_SURVIVAL_SLOT_COUNT; i++)
+    {
+        InventorySlot *slot = &inventory->slots[i];
+        if (!slot->occupied || slot->tile_id != tile_id || slot->count < count)
+        {
+            continue;
+        }
+
+        slot->count -= count;
+        if (slot->count == 0)
+        {
+            slot->occupied = false;
+            slot->tile_id = TILE_ID_COUNT;
+        }
+        return true;
+    }
+
+    return false;
+}
+
 int inventory_tile_count(const Inventory *inventory, int tile_id)
 {
     if (inventory == NULL || tile_id < 0 || tile_id >= TILE_ID_COUNT)

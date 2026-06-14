@@ -137,6 +137,8 @@ typedef enum TileId
     TILE_RADIO,
     TILE_SHIPPIECE,
     TILE_WOOD,
+    TILE_DOG_WHISTLE,
+    TILE_DOG_FOOD,
     TILE_ID_COUNT
 } TileId;
 

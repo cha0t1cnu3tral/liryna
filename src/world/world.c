@@ -626,6 +626,14 @@ void world_render(World *world, SDL_Renderer *renderer)
             SDL_RenderRect(renderer, &tile_rect);
         }
     }
+}
+
+void world_render_player(const World *world, SDL_Renderer *renderer)
+{
+    if (world == NULL || renderer == NULL || world->tile_size <= 0)
+    {
+        return;
+    }
 
     SDL_FRect player_rect;
     player_rect.x = world->player_x;

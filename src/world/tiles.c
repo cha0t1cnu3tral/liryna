@@ -1534,6 +1534,30 @@ static const TileDefinition g_tile_definitions[TILE_ID_COUNT] =
         .resource_yield = 1,
         .renewable = false,
     },
+    {
+        .id = TILE_DOG_WHISTLE,
+        .name = "Dog Whistle",
+        .walkable = true,
+        .layer = TILE_LAYER_OBJECT,
+        .blocks_land_movement = false,
+        .blocks_swimming = true,
+        .buildable_on = true,
+        .requires_foundation = false,
+        .is_liquid = false,
+        .movement_cost_land = 1,
+    },
+    {
+        .id = TILE_DOG_FOOD,
+        .name = "Dog Food",
+        .walkable = true,
+        .layer = TILE_LAYER_OBJECT,
+        .blocks_land_movement = false,
+        .blocks_swimming = true,
+        .buildable_on = true,
+        .requires_foundation = false,
+        .is_liquid = false,
+        .movement_cost_land = 1,
+    },
 };
 
 size_t tiles_count(void)
