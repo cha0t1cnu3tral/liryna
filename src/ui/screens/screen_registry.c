@@ -16,6 +16,8 @@ const UiScreenDefinition *ui_get_screen_definition(UiScreen screen)
         return ui_survival_inventory_screen();
     case UI_SCREEN_STRUCTURE_SAVE:
         return ui_structure_save_screen();
+    case UI_SCREEN_STRUCTURE_BROWSER:
+        return ui_structure_browser_screen();
     case UI_SCREEN_SAVED_WORLDS:
         return ui_saved_worlds_screen();
     case UI_SCREEN_SETTINGS:

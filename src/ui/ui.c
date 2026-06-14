@@ -46,6 +46,9 @@ static bool ui_is_external_action(UiAction action)
            action == UI_ACTION_START_STRUCTURE_BUILDER ||
            action == UI_ACTION_SELECT_CREATIVE_TILE ||
            action == UI_ACTION_SAVE_STRUCTURE ||
+           action == UI_ACTION_SELECT_STRUCTURE_ENTRY ||
+           action == UI_ACTION_SAVE_STRUCTURE_SETTINGS ||
+           action == UI_ACTION_EDIT_STRUCTURE_ENTRY ||
            action == UI_ACTION_SELECT_SURVIVAL_TILE ||
            action == UI_ACTION_EXIT;
 }
@@ -976,6 +979,9 @@ static bool ui_handle_internal_action(UiState *ui, UiAction selected_action,
     case UI_ACTION_OPEN_SAVED_WORLDS:
         ui_push_screen(ui, UI_SCREEN_SAVED_WORLDS, announce);
         return true;
+    case UI_ACTION_OPEN_STRUCTURE_BROWSER:
+        ui_push_screen(ui, UI_SCREEN_STRUCTURE_BROWSER, announce);
+        return true;
     case UI_ACTION_OPEN_SETTINGS:
         ui_push_screen(ui, UI_SCREEN_SETTINGS, announce);
         return true;
@@ -995,6 +1001,9 @@ static bool ui_handle_internal_action(UiState *ui, UiAction selected_action,
     case UI_ACTION_SELECT_CREATIVE_TILE:
     case UI_ACTION_SELECT_SURVIVAL_TILE:
     case UI_ACTION_SAVE_STRUCTURE:
+    case UI_ACTION_SELECT_STRUCTURE_ENTRY:
+    case UI_ACTION_SAVE_STRUCTURE_SETTINGS:
+    case UI_ACTION_EDIT_STRUCTURE_ENTRY:
     case UI_ACTION_EXIT:
     default:
         return false;

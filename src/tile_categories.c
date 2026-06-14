@@ -121,6 +121,7 @@ TileCategory tile_category_for_definition(const TileDefinition *tile)
     case TILE_BARRICADESANDBAG:
     case TILE_RUINEDWALL:
     case TILE_CRACKEDWALL:
+    case TILE_WOODDOOR:
     case TILE_SHIPPIECE:
         return TILE_CATEGORY_STRUCTURES;
     default:

@@ -3,6 +3,7 @@
 static const UiWidget k_main_menu_buttons[] = {
     UI_BUTTON("New world", UI_ACTION_NEW_WORLD),
     UI_BUTTON("Structure builder", UI_ACTION_START_STRUCTURE_BUILDER),
+    UI_BUTTON("Structure browser", UI_ACTION_OPEN_STRUCTURE_BROWSER),
     UI_BUTTON("Saved worlds", UI_ACTION_OPEN_SAVED_WORLDS),
     UI_BUTTON("Settings", UI_ACTION_OPEN_SETTINGS),
     UI_BUTTON("Help", UI_ACTION_OPEN_HELP),

@@ -843,6 +843,7 @@ static bool game_tile_is_wall_like(const TileDefinition *tile)
     case TILE_BARRICADESANDBAG:
     case TILE_RUINEDWALL:
     case TILE_CRACKEDWALL:
+    case TILE_WOODDOOR:
         return true;
     case TILE_ID_COUNT:
     default:
@@ -2564,6 +2565,73 @@ static void game_update(Engine *engine, void *userdata)
             game_announce(error_message[0] != '\0' ? error_message
                                                    : "Structure save failed.",
                           true);
+        }
+    }
+
+    if (action == UI_ACTION_SELECT_STRUCTURE_ENTRY)
+    {
+        char error_message[160];
+        const int entry_index = ui_focused_widget_user_data(&game->ui);
+        if (ui_structure_browser_select_entry(entry_index, error_message, sizeof(error_message)))
+        {
+            const char *label = ui_focused_widget_label(&game->ui);
+            char message[256];
+            snprintf(message, sizeof(message), "Opened %s generation settings.",
+                     label != NULL ? label : "structure");
+            game_announce(message, true);
+        }
+        else
+        {
+            game_announce(error_message[0] != '\0' ? error_message
+                                                   : "Could not open structure settings.",
+                          true);
+        }
+    }
+
+    if (action == UI_ACTION_SAVE_STRUCTURE_SETTINGS)
+    {
+        char saved_path[256];
+        char error_message[160];
+        if (ui_structure_browser_save_selected(saved_path, sizeof(saved_path),
+                                               error_message, sizeof(error_message)))
+        {
+            char message[320];
+            snprintf(message, sizeof(message), "Generation settings saved to %s.", saved_path);
+            game_announce(message, true);
+        }
+        else
+        {
+            game_announce(error_message[0] != '\0' ? error_message
+                                                   : "Structure settings save failed.",
+                          true);
+        }
+    }
+
+    if (action == UI_ACTION_EDIT_STRUCTURE_ENTRY)
+    {
+        char error_message[160];
+        game_announce("Opening selected structure in builder.", true);
+        if (game_create_structure_builder_world(game) &&
+            ui_structure_browser_load_selected_into_world(&game->world,
+                                                          &game->structure_builder_config,
+                                                          error_message,
+                                                          sizeof(error_message)))
+        {
+            ui_structure_save_bind_config(&game->structure_builder_config);
+            game_recenter_cursor(game);
+            ui_show_screen(&game->ui, UI_SCREEN_WORLD,
+                           game->speech_ready ? game_announce : NULL);
+            game_announce("Structure loaded. Walk around and edit it in the builder.", true);
+        }
+        else
+        {
+            game_announce(error_message[0] != '\0' ? error_message
+                                                   : "Could not load structure for editing.",
+                          true);
+            if (!game->world_loaded)
+            {
+                ui_init(&game->ui, game->speech_ready ? game_announce : NULL);
+            }
         }
     }
 
