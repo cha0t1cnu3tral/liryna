@@ -5,6 +5,7 @@
 
 #include "engine.h"
 #include "audio_backend.h"
+#include "audio_navigation.h"
 #include "inventory.h"
 #include "music_player.h"
 #include "opening_scene.h"
@@ -51,6 +52,7 @@ typedef struct Game
     bool prev_page_up;
     bool prev_page_down;
     bool prev_home;
+    bool prev_end;
     bool prev_tab;
     bool prev_space;
     bool prev_e;
@@ -1846,6 +1848,66 @@ static bool game_start_auto_walk_to_tracker_target(Game *game)
     return true;
 }
 
+static void game_toggle_audio_navigation(Game *game)
+{
+    if (game == NULL || !game->world_loaded)
+    {
+        return;
+    }
+
+    if (audio_navigation_is_active())
+    {
+        audio_navigation_stop();
+        game_announce("Audio navigation off.", true);
+        return;
+    }
+
+    int total = 0;
+    int object_x = 0;
+    int object_y = 0;
+    const TileDefinition *object_tile = NULL;
+    const bool has_object =
+        game_get_tracker_target(game, &total, &object_x, &object_y, &object_tile);
+    if (!has_object || total <= 0)
+    {
+        game_announce("Audio navigation unavailable. No tracked object selected.", true);
+        return;
+    }
+
+    audio_navigation_start();
+
+    char message[224];
+    snprintf(message, sizeof(message), "Audio navigation on. Guiding to %s at X %d Y %d.",
+             object_tile != NULL && object_tile->name != NULL ? object_tile->name : "object",
+             object_x, object_y);
+    game_announce(message, true);
+}
+
+static void game_update_audio_navigation(Game *game, float delta_time)
+{
+    if (game == NULL || !audio_navigation_is_active())
+    {
+        return;
+    }
+
+    if (!game->world_loaded || game->world.tile_size <= 0)
+    {
+        audio_navigation_update(false, 0, 0, 0, 0, delta_time);
+        return;
+    }
+
+    int player_tile_x = 0;
+    int player_tile_y = 0;
+    int object_x = 0;
+    int object_y = 0;
+    const bool has_player = game_get_player_tile_position(game, &player_tile_x, &player_tile_y);
+    const bool has_object =
+        game_get_tracker_target(game, NULL, &object_x, &object_y, NULL);
+
+    audio_navigation_update(has_player && has_object, player_tile_x, player_tile_y,
+                            object_x, object_y, delta_time);
+}
+
 static void game_apply_auto_walk(Game *game,
                                  bool manual_move_input,
                                  float *move_x,
@@ -2269,6 +2331,7 @@ static void game_init(Engine *engine, void *userdata)
     game->prev_page_up = false;
     game->prev_page_down = false;
     game->prev_home = false;
+    game->prev_end = false;
     game->prev_tab = false;
     game->prev_space = false;
     game->prev_e = false;
@@ -2332,6 +2395,10 @@ static void game_init(Engine *engine, void *userdata)
     {
         fprintf(stderr, "game: opening scene audio failed to start\n");
     }
+    if (!audio_navigation_init())
+    {
+        fprintf(stderr, "game: audio navigation failed to start\n");
+    }
 
     srand((unsigned int)time(NULL));
     ui_init(&game->ui, game->speech_ready ? game_announce : NULL);
@@ -2363,6 +2430,7 @@ static void game_update(Engine *engine, void *userdata)
     const bool page_up_now = engine_key_down(engine, SDL_SCANCODE_PAGEUP);
     const bool page_down_now = engine_key_down(engine, SDL_SCANCODE_PAGEDOWN);
     const bool home_now = engine_key_down(engine, SDL_SCANCODE_HOME);
+    const bool end_now = engine_key_down(engine, SDL_SCANCODE_END);
     const bool tab_now = engine_key_down(engine, SDL_SCANCODE_TAB);
     const bool space_now = engine_key_down(engine, SDL_SCANCODE_SPACE);
     const bool e_now = engine_key_down(engine, SDL_SCANCODE_E);
@@ -2408,6 +2476,7 @@ static void game_update(Engine *engine, void *userdata)
     const bool page_up_pressed = page_up_now && !game->prev_page_up;
     const bool page_down_pressed = page_down_now && !game->prev_page_down;
     const bool home_pressed = home_now && !game->prev_home;
+    const bool end_pressed = end_now && !game->prev_end;
     const bool tab_pressed = tab_now && !game->prev_tab;
     const bool space_pressed = space_now && !game->prev_space;
     const bool e_pressed = e_now && !game->prev_e;
@@ -2443,6 +2512,7 @@ static void game_update(Engine *engine, void *userdata)
     game->prev_page_up = page_up_now;
     game->prev_page_down = page_down_now;
     game->prev_home = home_now;
+    game->prev_end = end_now;
     game->prev_tab = tab_now;
     game->prev_space = space_now;
     game->prev_e = e_now;
@@ -2717,6 +2787,7 @@ static void game_update(Engine *engine, void *userdata)
     if (!in_world_screen)
     {
         water_biome_audio_update(NULL, delta_time);
+        audio_navigation_stop();
         game->has_prev_tile = false;
         game->has_prev_blocked_tile = false;
         game->auto_walk_active = false;
@@ -2728,6 +2799,7 @@ static void game_update(Engine *engine, void *userdata)
     if (opening_scene_active)
     {
         water_biome_audio_update(NULL, delta_time);
+        audio_navigation_stop();
         game->has_prev_tile = false;
         game_sync_cursor_to_player_if_locked(game);
         game->has_prev_blocked_tile = false;
@@ -3006,6 +3078,13 @@ static void game_update(Engine *engine, void *userdata)
             game_announce_tracker_coordinates(game, true);
         }
     }
+
+    if (end_pressed)
+    {
+        game_toggle_audio_navigation(game);
+    }
+
+    game_update_audio_navigation(game, delta_time);
 }
 
 static void game_render(Engine *engine, void *userdata)
@@ -3045,6 +3124,7 @@ static void game_shutdown(Engine *engine, void *userdata)
     music_player_shutdown();
     opening_scene_shutdown();
     water_biome_audio_shutdown();
+    audio_navigation_shutdown();
     audio_backend_shutdown();
     settings_save();
     speech_shutdown();
