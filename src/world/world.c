@@ -253,6 +253,15 @@ static SDL_Color world_tile_color(const TileDefinition *tile)
         return (SDL_Color){70, 70, 70, 255};
     }
 
+    if (tile->id == TILE_WOODDOOR)
+    {
+        return (SDL_Color){105, 62, 28, 255};
+    }
+    if (tile->id == TILE_WOODDOOROPEN)
+    {
+        return (SDL_Color){185, 130, 70, 255};
+    }
+
     if (tile->is_liquid)
     {
         return (SDL_Color){40, 95, 185, 255};

@@ -30,7 +30,7 @@ static UiWidget g_structure_browser_type_widgets[1];
 static UiWidget g_structure_browser_biome_widgets[BIOME_TYPE_COUNT];
 static UiWidget g_structure_browser_support_widgets[TILE_ID_COUNT];
 static UiWidget g_structure_browser_action_widgets[] = {
-    UI_BUTTON("Edit selected structure", UI_ACTION_EDIT_STRUCTURE_ENTRY),
+    UI_BUTTON("Open, walk around, and edit selected structure", UI_ACTION_EDIT_STRUCTURE_ENTRY),
     UI_BUTTON("Save generation settings", UI_ACTION_SAVE_STRUCTURE_SETTINGS),
     UI_BUTTON("Back", UI_ACTION_BACK),
 };
