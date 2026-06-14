@@ -253,6 +253,15 @@ static SDL_Color world_tile_color(const TileDefinition *tile)
         return (SDL_Color){70, 70, 70, 255};
     }
 
+    if (tile->id == TILE_WOODDOOR)
+    {
+        return (SDL_Color){105, 62, 28, 255};
+    }
+    if (tile->id == TILE_WOODDOOROPEN)
+    {
+        return (SDL_Color){185, 130, 70, 255};
+    }
+
     if (tile->is_liquid)
     {
         return (SDL_Color){40, 95, 185, 255};
@@ -616,6 +625,14 @@ void world_render(World *world, SDL_Renderer *renderer)
             SDL_SetRenderDrawColor(renderer, 55, 55, 55, 255);
             SDL_RenderRect(renderer, &tile_rect);
         }
+    }
+}
+
+void world_render_player(const World *world, SDL_Renderer *renderer)
+{
+    if (world == NULL || renderer == NULL || world->tile_size <= 0)
+    {
+        return;
     }
 
     SDL_FRect player_rect;

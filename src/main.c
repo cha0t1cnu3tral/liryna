@@ -6,6 +6,7 @@
 #include "engine.h"
 #include "audio_backend.h"
 #include "audio_navigation.h"
+#include "dog.h"
 #include "inventory.h"
 #include "music_player.h"
 #include "opening_scene.h"
@@ -56,6 +57,7 @@ typedef struct Game
     bool prev_tab;
     bool prev_space;
     bool prev_e;
+    bool prev_x;
     bool prev_left_bracket;
     bool prev_right_bracket;
     bool prev_mouse_right;
@@ -237,6 +239,14 @@ static void game_announce_cursor_tile(Game *game, bool interrupt)
         game->cursor_tile_y == player_tile_y)
     {
         game_announce("Player.", interrupt);
+        return;
+    }
+
+    char dog_message[192];
+    if (dog_system_describe_at(&game->world, game->cursor_tile_x, game->cursor_tile_y,
+                               dog_message, sizeof(dog_message)))
+    {
+        game_announce(dog_message, interrupt);
         return;
     }
 
@@ -846,6 +856,7 @@ static bool game_tile_is_wall_like(const TileDefinition *tile)
     case TILE_RUINEDWALL:
     case TILE_CRACKEDWALL:
     case TILE_WOODDOOR:
+    case TILE_WOODDOOROPEN:
         return true;
     case TILE_ID_COUNT:
     default:
@@ -896,6 +907,72 @@ static void game_apply_structure_builder_biome(Game *game, BiomeType biome_type)
             }
         }
     }
+}
+
+static bool game_try_toggle_door_at(Game *game, int tile_x, int tile_y)
+{
+    if (game == NULL || !game->world_loaded ||
+        !world_is_in_bounds(&game->world, tile_x, tile_y))
+    {
+        return false;
+    }
+
+    const TileId door_id =
+        world_get_tile_id_at_layer(&game->world, tile_x, tile_y, TILE_LAYER_STRUCTURE);
+    if (door_id == TILE_WOODDOOR)
+    {
+        world_set_tile_at_layer(&game->world, tile_x, tile_y, TILE_LAYER_STRUCTURE,
+                                TILE_WOODDOOROPEN);
+        game_announce("Wood door opened.", true);
+        return true;
+    }
+    if (door_id != TILE_WOODDOOROPEN)
+    {
+        return false;
+    }
+
+    int player_x = -1;
+    int player_y = -1;
+    if (game_get_player_tile_position(game, &player_x, &player_y) &&
+        player_x == tile_x && player_y == tile_y)
+    {
+        game_announce("Move out of the doorway before closing it.", true);
+        return true;
+    }
+
+    world_set_tile_at_layer(&game->world, tile_x, tile_y, TILE_LAYER_STRUCTURE,
+                            TILE_WOODDOOR);
+    game_announce("Wood door closed.", true);
+    return true;
+}
+
+static bool game_try_toggle_door(Game *game)
+{
+    int player_x = -1;
+    int player_y = -1;
+    if (game == NULL ||
+        !game_get_player_tile_position(game, &player_x, &player_y))
+    {
+        return false;
+    }
+
+    int facing_x = game->facing_dir_x;
+    int facing_y = game->facing_dir_y;
+    if (facing_x == 0 && facing_y == 0)
+    {
+        facing_y = 1;
+    }
+
+    if (game_try_toggle_door_at(game, player_x + facing_x, player_y + facing_y))
+    {
+        return true;
+    }
+    if (game_try_toggle_door_at(game, game->cursor_tile_x, game->cursor_tile_y))
+    {
+        return true;
+    }
+
+    return false;
 }
 
 static void game_cycle_structure_builder_biome(Game *game, int direction)
@@ -1560,6 +1637,9 @@ static void game_place_opening_wreckage(Game *game)
     game_set_world_tile_if_in_bounds(&game->world, spawn_x + 2, spawn_y, TILE_PICKAXE);
     game_set_world_tile_if_in_bounds(&game->world, spawn_x + 1, spawn_y + 1, TILE_READER);
     game_set_world_tile_if_in_bounds(&game->world, spawn_x, spawn_y + 1, TILE_RADIO);
+    game_set_world_tile_if_in_bounds(&game->world, spawn_x - 1, spawn_y + 1, TILE_DOG_WHISTLE);
+    game_set_world_tile_if_in_bounds(&game->world, spawn_x - 2, spawn_y + 1, TILE_DOG_FOOD);
+    game_set_world_tile_if_in_bounds(&game->world, spawn_x - 2, spawn_y, TILE_DOG_FOOD);
 }
 
 static void game_announce_blocked_feature_ahead(Game *game, int move_dir_x, int move_dir_y)
@@ -2210,6 +2290,7 @@ static bool game_create_new_world(Game *game, GameMode mode)
         game->world_loaded = false;
     }
     game_clear_builder_copy_buffer(game);
+    dog_system_reset();
 
     if (!world_init(&game->world, WORLD_WIDTH_TILES, WORLD_HEIGHT_TILES, 32))
     {
@@ -2225,6 +2306,11 @@ static bool game_create_new_world(Game *game, GameMode mode)
     if (mode == GAME_MODE_SURVIVAL)
     {
         game_place_opening_wreckage(game);
+    }
+    const int generated_dogs = dog_system_populate_world(&game->world);
+    if (generated_dogs <= 0)
+    {
+        fprintf(stderr, "game: world generation placed no dogs\n");
     }
     game->has_prev_tile = false;
     game->tracker_category_index = 0;
@@ -2242,8 +2328,9 @@ static bool game_create_new_world(Game *game, GameMode mode)
     game->prev_blocked_tile_x = -1;
     game->prev_blocked_tile_y = -1;
     game_reset_builder_shape_state(game);
-    game_announce(mode == GAME_MODE_CREATIVE ? "Creative world ready."
-                                             : "Survival world ready.",
+    game_announce(mode == GAME_MODE_CREATIVE
+                      ? "Creative world ready. Press X to open or close doors."
+                      : "Survival world ready. Press X to open or close doors.",
                   false);
     return true;
 }
@@ -2267,6 +2354,7 @@ static bool game_create_structure_builder_world(Game *game)
         game->world_loaded = false;
     }
     game_clear_builder_copy_buffer(game);
+    dog_system_reset();
 
     if (!world_init_flat(&game->world,
                          BUILDER_WORLD_WIDTH_TILES,
@@ -2305,9 +2393,37 @@ static bool game_create_structure_builder_world(Game *game)
     game->prev_blocked_tile_x = -1;
     game->prev_blocked_tile_y = -1;
     game_reset_builder_shape_state(game);
-    game_announce("Structure builder ready. E opens inventory. Enter uses the selected builder tool. Left and right bracket change tool. Copy uses two Enter points. Paste uses Enter. Shift Enter toggles fill mode for shape tools. Backspace removes. Control Tab changes biome. Tab opens save.",
+    game_announce("Structure builder ready. Walk with W A S D. X opens or closes doors. E opens inventory. Enter uses the selected builder tool. Left and right bracket change tool. Copy uses two Enter points. Paste uses Enter. Shift Enter toggles fill mode for shape tools. Backspace removes. Control Tab changes biome. Tab opens save.",
                   false);
     return true;
+}
+
+static bool game_open_selected_structure(Game *game)
+{
+    char error_message[160] = "";
+    game_announce("Opening selected structure in builder.", true);
+    if (game_create_structure_builder_world(game) &&
+        ui_structure_browser_load_selected_into_world(&game->world,
+                                                      &game->structure_builder_config,
+                                                      error_message,
+                                                      sizeof(error_message)))
+    {
+        ui_structure_save_bind_config(&game->structure_builder_config);
+        game_recenter_cursor(game);
+        ui_show_screen(&game->ui, UI_SCREEN_WORLD,
+                       game->speech_ready ? game_announce : NULL);
+        game_announce("Structure loaded. Walk with W A S D, edit it in the builder, and press X to open or close doors.", true);
+        return true;
+    }
+
+    game_announce(error_message[0] != '\0' ? error_message
+                                           : "Could not load structure for editing.",
+                  true);
+    if (!game->world_loaded)
+    {
+        ui_init(&game->ui, game->speech_ready ? game_announce : NULL);
+    }
+    return false;
 }
 
 static void game_init(Engine *engine, void *userdata)
@@ -2335,6 +2451,7 @@ static void game_init(Engine *engine, void *userdata)
     game->prev_tab = false;
     game->prev_space = false;
     game->prev_e = false;
+    game->prev_x = false;
     game->prev_left_bracket = false;
     game->prev_right_bracket = false;
     game->prev_mouse_right = false;
@@ -2381,6 +2498,10 @@ static void game_init(Engine *engine, void *userdata)
     if (!audio_backend_init())
     {
         fprintf(stderr, "game: miniaudio backend failed to start\n");
+    }
+    if (!dog_system_init())
+    {
+        fprintf(stderr, "game: dog audio failed to start\n");
     }
 
     if (!music_player_start_main_menu_music())
@@ -2434,6 +2555,7 @@ static void game_update(Engine *engine, void *userdata)
     const bool tab_now = engine_key_down(engine, SDL_SCANCODE_TAB);
     const bool space_now = engine_key_down(engine, SDL_SCANCODE_SPACE);
     const bool e_now = engine_key_down(engine, SDL_SCANCODE_E);
+    const bool x_now = engine_key_down(engine, SDL_SCANCODE_X);
     const bool left_bracket_now = engine_key_down(engine, SDL_SCANCODE_LEFTBRACKET);
     const bool right_bracket_now = engine_key_down(engine, SDL_SCANCODE_RIGHTBRACKET);
     bool hotbar_keys_now[INVENTORY_HOTBAR_SLOT_COUNT] = {
@@ -2480,6 +2602,7 @@ static void game_update(Engine *engine, void *userdata)
     const bool tab_pressed = tab_now && !game->prev_tab;
     const bool space_pressed = space_now && !game->prev_space;
     const bool e_pressed = e_now && !game->prev_e;
+    const bool x_pressed = x_now && !game->prev_x;
     const bool left_bracket_pressed =
         left_bracket_now && !game->prev_left_bracket;
     const bool right_bracket_pressed =
@@ -2516,6 +2639,7 @@ static void game_update(Engine *engine, void *userdata)
     game->prev_tab = tab_now;
     game->prev_space = space_now;
     game->prev_e = e_now;
+    game->prev_x = x_now;
     game->prev_left_bracket = left_bracket_now;
     game->prev_right_bracket = right_bracket_now;
     game->prev_mouse_right = mouse_right_now;
@@ -2644,11 +2768,7 @@ static void game_update(Engine *engine, void *userdata)
         const int entry_index = ui_focused_widget_user_data(&game->ui);
         if (ui_structure_browser_select_entry(entry_index, error_message, sizeof(error_message)))
         {
-            const char *label = ui_focused_widget_label(&game->ui);
-            char message[256];
-            snprintf(message, sizeof(message), "Opened %s generation settings.",
-                     label != NULL ? label : "structure");
-            game_announce(message, true);
+            game_open_selected_structure(game);
         }
         else
         {
@@ -2679,30 +2799,7 @@ static void game_update(Engine *engine, void *userdata)
 
     if (action == UI_ACTION_EDIT_STRUCTURE_ENTRY)
     {
-        char error_message[160];
-        game_announce("Opening selected structure in builder.", true);
-        if (game_create_structure_builder_world(game) &&
-            ui_structure_browser_load_selected_into_world(&game->world,
-                                                          &game->structure_builder_config,
-                                                          error_message,
-                                                          sizeof(error_message)))
-        {
-            ui_structure_save_bind_config(&game->structure_builder_config);
-            game_recenter_cursor(game);
-            ui_show_screen(&game->ui, UI_SCREEN_WORLD,
-                           game->speech_ready ? game_announce : NULL);
-            game_announce("Structure loaded. Walk around and edit it in the builder.", true);
-        }
-        else
-        {
-            game_announce(error_message[0] != '\0' ? error_message
-                                                   : "Could not load structure for editing.",
-                          true);
-            if (!game->world_loaded)
-            {
-                ui_init(&game->ui, game->speech_ready ? game_announce : NULL);
-            }
-        }
+        game_open_selected_structure(game);
     }
 
     if (e_pressed)
@@ -2831,6 +2928,11 @@ static void game_update(Engine *engine, void *userdata)
         game_recenter_cursor(game);
     }
 
+    if (x_pressed)
+    {
+        game_try_toggle_door(game);
+    }
+
     float move_x = 0.0f;
     float move_y = 0.0f;
 
@@ -2890,6 +2992,44 @@ static void game_update(Engine *engine, void *userdata)
             game_clear_builder_target_tile(game);
         }
     }
+    else if (enter_pressed &&
+             dog_system_item_has_action((TileId)game->inventory.selected_tile))
+    {
+        if (game->game_mode == GAME_MODE_SURVIVAL &&
+            game->inventory.selected_tile == TILE_DOG_FOOD &&
+            inventory_tile_count(&game->inventory, TILE_DOG_FOOD) <= 0)
+        {
+            game_announce("You do not have Dog Food.", true);
+        }
+        else
+        {
+            int player_tile_x = 0;
+            int player_tile_y = 0;
+            char message[192];
+            bool consumed = false;
+            if (game_get_player_tile_position(game, &player_tile_x, &player_tile_y) &&
+                dog_system_use_item(&game->world,
+                                    (TileId)game->inventory.selected_tile,
+                                    player_tile_x,
+                                    player_tile_y,
+                                    game->facing_dir_x,
+                                    game->facing_dir_y,
+                                    message,
+                                    sizeof(message),
+                                    &consumed))
+            {
+                if (consumed && game->game_mode == GAME_MODE_SURVIVAL &&
+                    !inventory_remove_survival(&game->inventory,
+                                               game->inventory.selected_tile,
+                                               1))
+                {
+                    game_announce("You do not have that item.", true);
+                    return;
+                }
+                game_announce(message, true);
+            }
+        }
+    }
 
     const bool tool_use_consumed =
         game->structure_builder_active ? false
@@ -2902,6 +3042,7 @@ static void game_update(Engine *engine, void *userdata)
     const float player_x_before = game->world.player_x;
     const float player_y_before = game->world.player_y;
     world_update(&game->world, delta_time, move_x, move_y, jump_pressed);
+    dog_system_update(&game->world, delta_time);
     game_update_auto_walk_progress(game, player_x_before, player_y_before, delta_time);
     if (!game->structure_builder_active)
     {
@@ -3095,6 +3236,8 @@ static void game_render(Engine *engine, void *userdata)
     if (ui_screen(&game->ui) == UI_SCREEN_WORLD && game->world_loaded)
     {
         world_render(&game->world, renderer);
+        dog_system_render(&game->world, renderer);
+        world_render_player(&game->world, renderer);
         return;
     }
 
@@ -3125,6 +3268,7 @@ static void game_shutdown(Engine *engine, void *userdata)
     opening_scene_shutdown();
     water_biome_audio_shutdown();
     audio_navigation_shutdown();
+    dog_system_shutdown();
     audio_backend_shutdown();
     settings_save();
     speech_shutdown();

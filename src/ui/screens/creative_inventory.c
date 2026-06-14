@@ -42,7 +42,7 @@ static void ui_build_creative_inventory_screen(void)
     for (int tile_id = 0; tile_id < total_tiles; tile_id++)
     {
         const TileDefinition *tile = tiles_get_definition((TileId)tile_id);
-        if (tile == NULL)
+        if (tile == NULL || tile->id == TILE_WOODDOOROPEN)
         {
             continue;
         }

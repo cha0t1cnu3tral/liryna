@@ -92,6 +92,8 @@ TileCategory tile_category_for_definition(const TileDefinition *tile)
         return TILE_CATEGORY_FURNITURE;
     case TILE_SMALLAXE:
     case TILE_PICKAXE:
+    case TILE_DOG_WHISTLE:
+    case TILE_DOG_FOOD:
         return TILE_CATEGORY_TOOLS;
     case TILE_WOOD:
         return TILE_CATEGORY_MISC;
@@ -122,6 +124,7 @@ TileCategory tile_category_for_definition(const TileDefinition *tile)
     case TILE_RUINEDWALL:
     case TILE_CRACKEDWALL:
     case TILE_WOODDOOR:
+    case TILE_WOODDOOROPEN:
     case TILE_SHIPPIECE:
         return TILE_CATEGORY_STRUCTURES;
     default:

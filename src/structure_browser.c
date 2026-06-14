@@ -944,6 +944,143 @@ static BiomeType first_allowed_biome(const bool allowed_biomes[BIOME_TYPE_COUNT]
     return BIOME_PLAINS;
 }
 
+static bool structure_spawn_tile_is_walkable(World *world,
+                                             int world_x,
+                                             int world_y,
+                                             bool require_floor)
+{
+    bool swimming = false;
+    if (!world_can_occupy_tile(world, world_x, world_y, &swimming, NULL, NULL) || swimming)
+    {
+        return false;
+    }
+
+    return !require_floor ||
+           world_get_tile_at_layer(world, world_x, world_y, TILE_LAYER_FLOOR) != NULL;
+}
+
+static bool find_world_spawn_in_connected_area(World *world,
+                                               int origin_x,
+                                               int origin_y,
+                                               int width,
+                                               int height,
+                                               bool require_floor,
+                                               int *out_x,
+                                               int *out_y)
+{
+    if (world == NULL || out_x == NULL || out_y == NULL || width <= 0 || height <= 0)
+    {
+        return false;
+    }
+
+    const int tile_count = width * height;
+    bool *visited = (bool *)calloc((size_t)tile_count, sizeof(bool));
+    int *queue = (int *)malloc((size_t)tile_count * sizeof(int));
+    if (visited == NULL || queue == NULL)
+    {
+        free(visited);
+        free(queue);
+        return false;
+    }
+
+    const int center_x = width / 2;
+    const int center_y = height / 2;
+    int best_component_size = 0;
+    int best_distance = 0;
+    int best_local_x = 0;
+    int best_local_y = 0;
+
+    static const int k_neighbor_x[] = {1, -1, 0, 0};
+    static const int k_neighbor_y[] = {0, 0, 1, -1};
+
+    for (int start_index = 0; start_index < tile_count; start_index++)
+    {
+        if (visited[start_index])
+        {
+            continue;
+        }
+
+        const int start_x = start_index % width;
+        const int start_y = start_index / width;
+        if (!structure_spawn_tile_is_walkable(world, origin_x + start_x, origin_y + start_y,
+                                              require_floor))
+        {
+            visited[start_index] = true;
+            continue;
+        }
+
+        int queue_read = 0;
+        int queue_write = 0;
+        int component_size = 0;
+        int component_x = start_x;
+        int component_y = start_y;
+        int component_distance =
+            abs(start_x - center_x) + abs(start_y - center_y);
+        queue[queue_write++] = start_index;
+        visited[start_index] = true;
+
+        while (queue_read < queue_write)
+        {
+            const int local_index = queue[queue_read++];
+            const int local_x = local_index % width;
+            const int local_y = local_index / width;
+            const int distance = abs(local_x - center_x) + abs(local_y - center_y);
+            component_size++;
+            if (distance < component_distance)
+            {
+                component_x = local_x;
+                component_y = local_y;
+                component_distance = distance;
+            }
+
+            for (int neighbor = 0; neighbor < 4; neighbor++)
+            {
+                const int next_x = local_x + k_neighbor_x[neighbor];
+                const int next_y = local_y + k_neighbor_y[neighbor];
+                if (next_x < 0 || next_y < 0 || next_x >= width || next_y >= height)
+                {
+                    continue;
+                }
+
+                const int next_index = (next_y * width) + next_x;
+                if (visited[next_index])
+                {
+                    continue;
+                }
+                if (!structure_spawn_tile_is_walkable(world, origin_x + next_x, origin_y + next_y,
+                                                      require_floor))
+                {
+                    continue;
+                }
+
+                visited[next_index] = true;
+                queue[queue_write++] = next_index;
+            }
+        }
+
+        if (component_size > best_component_size ||
+            (component_size == best_component_size && component_distance < best_distance))
+        {
+            best_component_size = component_size;
+            best_distance = component_distance;
+            best_local_x = component_x;
+            best_local_y = component_y;
+        }
+    }
+
+    free(visited);
+    free(queue);
+
+    if (best_component_size <= 0)
+    {
+        return false;
+    }
+
+    *out_x = origin_x + best_local_x;
+    *out_y = origin_y + best_local_y;
+    return true;
+}
+
 static bool find_world_spawn_inside_loaded_structure(World *world,
                                                      int origin_x,
                                                      int origin_y,
@@ -952,31 +1089,14 @@ static bool find_world_spawn_inside_loaded_structure(World *world,
                                                      int *out_x,
                                                      int *out_y)
 {
-    if (world == NULL || out_x == NULL || out_y == NULL)
+    if (find_world_spawn_in_connected_area(world, origin_x, origin_y, width, height, true,
+                                           out_x, out_y))
     {
-        return false;
+        return true;
     }
 
-    bool swimming = false;
-    const TileDefinition *support = NULL;
-    const TileDefinition *top = NULL;
-    for (int y = 0; y < height; y++)
-    {
-        for (int x = 0; x < width; x++)
-        {
-            const int world_x = origin_x + x;
-            const int world_y = origin_y + y;
-            if (world_can_occupy_tile(world, world_x, world_y, &swimming, &support, &top) &&
-                !swimming)
-            {
-                *out_x = world_x;
-                *out_y = world_y;
-                return true;
-            }
-        }
-    }
-
-    return false;
+    return find_world_spawn_in_connected_area(world, origin_x, origin_y, width, height, false,
+                                              out_x, out_y);
 }
 
 bool structure_browser_load_into_world(const StructureBrowserSettings *settings,

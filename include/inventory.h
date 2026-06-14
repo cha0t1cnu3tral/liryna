@@ -33,6 +33,7 @@ typedef struct Inventory
 
 void inventory_init(Inventory *inventory, GameMode mode);
 bool inventory_add_survival(Inventory *inventory, int tile_id, int count);
+bool inventory_remove_survival(Inventory *inventory, int tile_id, int count);
 int inventory_tile_count(const Inventory *inventory, int tile_id);
 bool inventory_is_unlimited_tile(const Inventory *inventory, int tile_id);
 bool inventory_assign_hotbar_slot(Inventory *inventory, int slot_index, int tile_id);

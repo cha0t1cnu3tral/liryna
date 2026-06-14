@@ -186,11 +186,16 @@ file(GLOB_RECURSE LIRYNA_TEST_SOURCES CONFIGURE_DEPENDS
 )
 
 if(BUILD_TESTING AND LIRYNA_TEST_SOURCES)
-    add_executable(liryna_tests ${LIRYNA_TEST_SOURCES})
+    add_executable(liryna_tests
+        ${LIRYNA_TEST_SOURCES}
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/inventory.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/world/tiles.c"
+    )
 
     target_include_directories(liryna_tests
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
 
     if(MSVC)
